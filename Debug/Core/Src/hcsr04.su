@@ -1,0 +1,6 @@
+../Core/Src/hcsr04.c:3:7:HCSR04_Init	24	static
+../Core/Src/hcsr04.c:15:7:HCSR04_TuneParams	24	static
+../Core/Src/hcsr04.c:20:7:HCSR04_Trigger	16	static
+../Core/Src/hcsr04.c:34:7:HCSR04_TickISR	16	static
+../Core/Src/hcsr04.c:50:7:HCSR04_UpdateFromISR	16	static
+../Core/Src/hcsr04.c:63:7:HCSR04_EventHandler	32	static

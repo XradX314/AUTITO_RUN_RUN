@@ -24,6 +24,14 @@
 
 #include <stdio.h>
 #include "OLED.h" // Librería de la pantalla
+#include "ESP01.h" //la librería del esp
+#include <string.h>
+#include "DisplayUI.h"
+#include "hcsr04.h"
+#include "protocolo.h"
+#include "comandos.h"
+#include <Button.h>
+
 
 /* USER CODE END Includes */
 
@@ -49,6 +57,7 @@ DMA_HandleTypeDef hdma_adc1;
 I2C_HandleTypeDef hi2c1;
 DMA_HandleTypeDef hdma_i2c1_tx;
 
+TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
 
@@ -72,33 +81,77 @@ static void MX_USART3_UART_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM3_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+#include "DisplayUI.h"
+#include "Button.h"
 
-// --- NUEVO: FUNCIONES PUENTE PARA EL OLED ---
+uint8_t rx_byte_esp;
+// Variable global para usar el dato en tu UI
+uint16_t distancia_actual_mm = 0;
+// Instancia del sensor
+HCSR04_t mi_sensor_ultra;
 
-int I2C_EscribirComando(uint8_t cmd) {
-    // 0x78 es la dirección I2C por defecto de las pantallas de 1.3"
-    // 0x00 indica que le estamos mandando un Comando
-    if (HAL_I2C_Mem_Write(&hi2c1, 0x78, 0x00, 1, &cmd, 1, 10) == HAL_OK) return 1;
-    return 0;
+// --- FUNCIONES PUENTE PARA EL HC-SR04 ---
+
+// Callback para disparar el pin TRIG
+void Sensor_SetTrig(uint8_t state) {
+    HAL_GPIO_WritePin(TRIG_GPIO_Port, TRIG_Pin, state ? GPIO_PIN_SET : GPIO_PIN_RESET);
 }
 
-int I2C_EscribirDatosDMA(uint8_t *data, uint16_t len) {
-    // 0x40 indica que le estamos mandando Datos a la RAM de la pantalla
-    if (HAL_I2C_Mem_Write_DMA(&hi2c1, 0x78, 0x40, 1, data, len) == HAL_OK) return 1;
-    return 0;
+// Callback cuando la librería termina de calcular la distancia
+void Sensor_OnResult(float dist_mm) {
+    distancia_actual_mm = (uint16_t)dist_mm; // Guardamos el valor
 }
 
-// Armamos la estructura de la librería OLED
-sOLEDHandle mi_oled = {
-    .I2C_WriteCmd = I2C_EscribirComando,
-    .I2C_WriteData_DMA = I2C_EscribirDatosDMA
+// ---- ESP01 PUENTE ----
+void ESP_CHPD_Ctrl(uint8_t value) { HAL_GPIO_WritePin(CHIPEN_ESP01_GPIO_Port, CHIPEN_ESP01_Pin, value ? GPIO_PIN_SET : GPIO_PIN_RESET); }
+int ESP_WriteUART(uint8_t value)  { if (HAL_UART_Transmit(&huart3, &value, 1, 2) == HAL_OK) return 1; return 0; }
+
+void ESP_ImprimirDebug(const char *dbgStr) {
+    if(ui_enable_uart) HAL_UART_Transmit(&huart1, (uint8_t*)dbgStr, strlen(dbgStr), 10);
+    UI_AddLog(dbgStr); // Ahora se lo mandamos a la nueva librería visual
+}
+
+void ESP_EstadoCallback(_eESP01STATUS estado) {
+    if (estado == ESP01_WIFI_NEW_IP) {
+        char msg[60];
+        sprintf(msg, "IP: %s", ESP01_GetLocalIP());
+        UI_AddLog(msg);
+    }
+    else if (estado == ESP01_UDPTCP_CONNECTED) UI_AddLog(">>> UDP LISTO <<<");
+}
+// NUEVO: Acá caen los bytes puros que llegan por WiFi UDP
+void ESP_RxPayload(uint8_t value) {
+    Protocolo_InjectRX(value);
+}
+
+_sESP01Handle mi_esp = { .DoCHPD = ESP_CHPD_Ctrl, .WriteUSARTByte = ESP_WriteUART, .WriteByteToBufRX = ESP_RxPayload };
+
+// ---- OLED PUENTE ----
+int I2C_EscribirComando(uint8_t cmd) { if (HAL_I2C_Mem_Write(&hi2c1, 0x78, 0x00, 1, &cmd, 1, 10) == HAL_OK) return 1; return 0; }
+int I2C_EscribirDatosDMA(uint8_t *data, uint16_t len) { if (HAL_I2C_Mem_Write_DMA(&hi2c1, 0x78, 0x40, 1, data, len) == HAL_OK) return 1; return 0; }
+sOLEDHandle mi_oled = { .I2C_WriteCmd = I2C_EscribirComando, .I2C_WriteData_DMA = I2C_EscribirDatosDMA };
+
+// ---- BOTONES PUENTE ----
+uint8_t Leer_SW0(void) { return HAL_GPIO_ReadPin(GPIOA, SW0_Pin); }
+sButtonHandle btn_sw0 = {
+    .ReadPin = Leer_SW0,
+    .longClickTimeMs = 800, // 0.8 seg para considerarlo pulsación larga
+    .OnShortClick = UI_ShortClick, // Directo a la UI!
+    .OnLongClick = UI_LongClick    // Directo a la UI!
 };
+
+
+
+
+// NUEVO: Variable para interceptar lo que llega por el cable UART desde la PC
+uint8_t rx_byte_pc;
 
 /* USER CODE END 0 */
 
@@ -138,12 +191,15 @@ int main(void)
   MX_TIM4_Init();
   MX_TIM3_Init();
   MX_I2C1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
 
 
 
   // 3. NUEVO: Arrancamos el OLED
     OLED_Init(&mi_oled);
+
+    UI_Init();               // NUEVO
 
    // 2. Iniciamos los dos canales PWM del Timer 3 para los motores
    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Motor Izquierdo (EN_A)
@@ -156,73 +212,137 @@ int main(void)
     // Mensaje de prueba (ya sabemos que anda)
     HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n--- INICIANDO SISTEMA ---\r\n", 29, HAL_MAX_DELAY);
 
+    // --- NUEVO: INICIO DEL ESP-01 ---
 
+    // Forzamos el encendido físico apenas arranca el micro
+          HAL_GPIO_WritePin(CHIPEN_ESP01_GPIO_Port, CHIPEN_ESP01_Pin, GPIO_PIN_SET);
+
+      // 1. Dejamos el USART3 "a la escucha" del primer byte que mande el ESP01
+      HAL_UART_Receive_IT(&huart3, &rx_byte_esp, 1);
+
+      // 2. Inicializamos la librería
+      ESP01_Init(&mi_esp);
+      // Enganchamos la función espía ANTES de iniciar
+      ESP01_AttachChangeState(ESP_EstadoCallback);
+      ESP01_AttachDebugStr(ESP_ImprimirDebug); // <--- NUEVO: Activa el modo espía
+
+
+      // 3. Configurá acá tu red de WiFi local
+      ESP01_SetWIFI("Elstein-fibra", "sanluis_1509");
+
+      // 4. (Opcional) Si vas a mandar telemetría a tu PC, poné la IP de tu compu
+      ESP01_StartUDP("192.168.0.23", 8080, 8080);
+
+
+      Button_Init(&btn_sw0);
+
+      // --- NUEVO: INICIO DEL PROTOCOLO ---
+        Protocolo_Init();
+        Protocolo_SetCmdParser(Comandos_Parsear);
+
+        // Dejamos la UART1 escuchando el primer byte de la PC
+        HAL_UART_Receive_IT(&huart1, &rx_byte_pc, 1);
+
+      // 1. Encendemos el cronómetro de alta resolución
+        HAL_TIM_Base_Start(&htim2);
+
+        // 2. Iniciamos la librería pasándole nuestras funciones puente
+        HCSR04_Init(&mi_sensor_ultra, Sensor_SetTrig, Sensor_OnResult);
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-      uint16_t contador_impresion = 0;
+        uint32_t last_10ms = 0;
+        uint32_t last_100ms_ui = 0;
+        uint32_t last_50ms_telem = 0;
 
 
-      while (1)
-      {
-        // --- 1. TAREAS DE FONDO NO BLOQUEANTES ---
+        // Nuevos contadores para el sensor
+          uint32_t last_1ms_ultra = 0;
+          uint32_t last_60ms_ultra = 0;
 
-
-
-        // ESP01_Task(); // Descomentar cuando uses WiFi
-        OLED_Task();  // Empuja los gráficos de la RAM a la pantalla por DMA
-
-
-        // --- 2. LÓGICA DE ALTA VELOCIDAD (Disparada por el ADC) ---
-
-        // Solo procesamos si el DMA nos avisa que los 3 sensores tienen datos frescos
-        if (adc_listo)
+        while (1)
         {
-          adc_listo = 0;
-          contador_impresion++;
+            uint32_t tick = HAL_GetTick();
 
-          // A. TELEMETRÍA: Se ejecuta 10 veces por segundo (cada 800 lecturas)
-          if (contador_impresion >= 800)
-          {
-            contador_impresion = 0;
+            // --- NUEVO: VIGILANCIA DE CONEXIÓN CONSTANTE ---
+            Comandos_ChequearTimeout();
 
-            // Actualizamos la pantalla OLED
-            OLED_ShowTelemetry(valores_ir[0], valores_ir[1], valores_ir[2]);
+            // --- 1. TAREAS DEL SENSOR ULTRASÓNICO ---
 
-            // Mandamos datos crudos por UART a la PC
-            int len = sprintf(uart_buf, "L: %4u | C: %4u | R: %4u\r\n",
-                              valores_ir[0], valores_ir[1], valores_ir[2]);
-            HAL_UART_Transmit(&huart1, (uint8_t*)uart_buf, len, HAL_MAX_DELAY);
-          }
+                  // A. Mantenimiento del pulso (Se ejecuta cada 1ms)
+                  if (tick - last_1ms_ultra >= 1) {
+                      last_1ms_ultra = tick;
+                      HCSR04_TickISR(&mi_sensor_ultra);
+                  }
 
-          // B. CONTROL DE MOTORES: Reacciona instantáneamente al sensor central
-          if (valores_ir[1] > 500)
-          {
-            // 1. Configuramos dirección (Hacia adelante)
-            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                  // B. Pedir medición nueva (Se ejecuta cada 60ms para evitar eco fantasma)
+                  if (tick - last_60ms_ultra >= 60) {
+                      last_60ms_ultra = tick;
+                      HCSR04_Trigger(&mi_sensor_ultra);
+                  }
 
-            // 2. Potencia al 50% (4999 sobre 9999)
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 4999); // Izquierdo
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999); // Derecho
-          }
-          else
-          {
-            // Si el valor es bajo, frenamos
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+                  // C. Procesar datos (Se ejecuta siempre, no bloquea)
+                  HCSR04_EventHandler(&mi_sensor_ultra);
 
-            // Cortamos la energía de las bobinas en el puente H
-            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-          }
-        }
+            // 1. TAREAS NO BLOQUEANTES DE HARDWARE
+            if (tick - last_10ms >= 10) {
+                last_10ms = tick;
+                ESP01_Timeout10ms();
+            }
+            ESP01_Task();
+            OLED_Task();
+            Button_Task(&btn_sw0);
+            Decode(); // Constantemente mastica los bytes que van llegando al RingBuffer
+
+            // 2. REFRESCO DE PANTALLA (A 10 FPS)
+            if (tick - last_100ms_ui >= 100) {
+                last_100ms_ui = tick;
+
+                uint8_t udp_ok = (ESP01_StateUDPTCP() == ESP01_UDPTCP_CONNECTED);
+                char* ip = ESP01_GetLocalIP();
+                // Llama a la función pasándole los 7 parámetros exactos:
+                          UI_Render(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm, ip, udp_ok, pc_conectada);
+            }
+
+            // 3. ENVÍO DE TELEMETRÍA LENTA (A 2 FPS)
+            if (tick - last_50ms_telem >= 50) {
+                last_50ms_telem = tick;
+
+
+                // 1. Cargamos el latido en el buffer
+                          Comandos_EnviarAlive();
+
+                // Ya no usamos sprintf(). Generamos el paquete binario en el buffer TX.
+                          Comandos_EnviarTelemetria(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm);
+
+                          // Y forzamos que se envíe por el aire/cable
+                          Comandos_FlushTx();
+            }
+
+            // 4. LÓGICA DE ALTA VELOCIDAD Y MOTORES (Disparada por el ADC)
+            if (adc_listo)
+            {
+                adc_listo = 0;
+
+                // Reacción instantánea del puente H al sensor
+//                if (valores_ir[1] > 500) {
+//                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 4999);
+//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999);
+//                } else {
+//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+//                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+//                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+//                }
+            }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -375,6 +495,51 @@ static void MX_I2C1_Init(void)
   /* USER CODE BEGIN I2C1_Init 2 */
 
   /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 35;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 65535;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -616,7 +781,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(CHIPEN_ESP01_GPIO_Port, CHIPEN_ESP01_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, IN_2_Pin|IN_1_Pin|IN_4_Pin|IN_3_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, TRIG_Pin|IN_2_Pin|IN_1_Pin|IN_4_Pin
+                          |IN_3_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : LED_BUILTIN_Pin */
   GPIO_InitStruct.Pin = LED_BUILTIN_Pin;
@@ -638,12 +804,24 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : IN_2_Pin IN_1_Pin IN_4_Pin IN_3_Pin */
-  GPIO_InitStruct.Pin = IN_2_Pin|IN_1_Pin|IN_4_Pin|IN_3_Pin;
+  /*Configure GPIO pin : ECHO_Pin */
+  GPIO_InitStruct.Pin = ECHO_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(ECHO_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : TRIG_Pin IN_2_Pin IN_1_Pin IN_4_Pin
+                           IN_3_Pin */
+  GPIO_InitStruct.Pin = TRIG_Pin|IN_2_Pin|IN_1_Pin|IN_4_Pin
+                          |IN_3_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -665,6 +843,43 @@ void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
     if (hi2c->Instance == I2C1)
     {
         OLED_DMA_Callback();
+    }
+}
+
+// Callback que se ejecuta cada vez que entra 1 byte por cualquier USART
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    // Datos del ESP-01
+    if (huart->Instance == USART3) {
+        ESP01_WriteRX(rx_byte_esp);
+        HAL_UART_Receive_IT(&huart3, &rx_byte_esp, 1);
+    }
+
+    // NUEVO: Datos de la PC por cable
+    if (huart->Instance == USART1) {
+        Protocolo_InjectRX(rx_byte_pc);
+        HAL_UART_Receive_IT(&huart1, &rx_byte_pc, 1);
+    }
+}
+
+
+// NUEVO: Blindaje contra el grito de 74880 baudios del ESP-01
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART3)
+    {
+        // Si la UART falla por leer basura (Framing Error/Overrun),
+        // limpiamos las banderas de error internamente y volvemos a armar la trampa
+        HAL_UART_Receive_IT(&huart3, &rx_byte_esp, 1);
+    }
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+    if (GPIO_Pin == ECHO_Pin) {
+        // Le pasamos a la librería: la instancia, los ticks actuales del TIM2, y el estado actual del pin
+        HCSR04_UpdateFromISR(&mi_sensor_ultra,
+                             __HAL_TIM_GET_COUNTER(&htim2),
+                             HAL_GPIO_ReadPin(ECHO_GPIO_Port, ECHO_Pin));
     }
 }
 

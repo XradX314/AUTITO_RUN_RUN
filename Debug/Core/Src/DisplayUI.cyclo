@@ -1,0 +1,5 @@
+../Core/Src/DisplayUI.c:26:6:UI_Init	1
+../Core/Src/DisplayUI.c:32:6:UI_ShortClick	3
+../Core/Src/DisplayUI.c:41:6:UI_LongClick	11
+../Core/Src/DisplayUI.c:62:6:UI_AddLog	6
+../Core/Src/DisplayUI.c:77:6:UI_Render	11

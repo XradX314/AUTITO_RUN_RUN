@@ -1,0 +1,5 @@
+../Core/Src/comandos.c:14:6:Comandos_Parsear	4
+../Core/Src/comandos.c:40:6:Comandos_EnviarAlive	1
+../Core/Src/comandos.c:45:6:Comandos_ChequearTimeout	3
+../Core/Src/comandos.c:54:6:Comandos_EnviarTelemetria	1
+../Core/Src/comandos.c:66:6:Comandos_FlushTx	6

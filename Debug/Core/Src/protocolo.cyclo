@@ -1,0 +1,5 @@
+../Core/Src/protocolo.c:12:6:Protocolo_Init	1
+../Core/Src/protocolo.c:24:6:Protocolo_SetCmdParser	1
+../Core/Src/protocolo.c:28:6:Decode	18
+../Core/Src/protocolo.c:62:6:Encode	2
+../Core/Src/protocolo.c:84:6:Protocolo_InjectRX	1
