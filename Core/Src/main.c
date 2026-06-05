@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 
 #include <stdio.h>
+#include "OLED.h" // Librería de la pantalla
 
 /* USER CODE END Includes */
 
@@ -44,6 +45,9 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+I2C_HandleTypeDef hi2c1;
+DMA_HandleTypeDef hdma_i2c1_tx;
 
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
@@ -67,12 +71,34 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// --- NUEVO: FUNCIONES PUENTE PARA EL OLED ---
+
+int I2C_EscribirComando(uint8_t cmd) {
+    // 0x78 es la dirección I2C por defecto de las pantallas de 1.3"
+    // 0x00 indica que le estamos mandando un Comando
+    if (HAL_I2C_Mem_Write(&hi2c1, 0x78, 0x00, 1, &cmd, 1, 10) == HAL_OK) return 1;
+    return 0;
+}
+
+int I2C_EscribirDatosDMA(uint8_t *data, uint16_t len) {
+    // 0x40 indica que le estamos mandando Datos a la RAM de la pantalla
+    if (HAL_I2C_Mem_Write_DMA(&hi2c1, 0x78, 0x40, 1, data, len) == HAL_OK) return 1;
+    return 0;
+}
+
+// Armamos la estructura de la librería OLED
+sOLEDHandle mi_oled = {
+    .I2C_WriteCmd = I2C_EscribirComando,
+    .I2C_WriteData_DMA = I2C_EscribirDatosDMA
+};
 
 /* USER CODE END 0 */
 
@@ -111,69 +137,92 @@ int main(void)
   MX_USART3_UART_Init();
   MX_TIM4_Init();
   MX_TIM3_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
 
-  // 1. Iniciamos el ADC y el TIM4 para los sensores (tu código actual)
-    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
-    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
 
-    // 2. Iniciamos los dos canales PWM del Timer 3 para los motores
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Motor Izquierdo (EN_A)
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // Motor Derecho (EN_B)
+
+  // 3. NUEVO: Arrancamos el OLED
+    OLED_Init(&mi_oled);
+
+   // 2. Iniciamos los dos canales PWM del Timer 3 para los motores
+   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3); // Motor Izquierdo (EN_A)
+   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4); // Motor Derecho (EN_B)
+
+   // 4. Arrancamos el ADC y nuestro metrónomo en modo Output Compare
+     HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
+     HAL_TIM_OC_Start(&htim4, TIM_CHANNEL_4); // <-- CLAVE: OC_Start
 
     // Mensaje de prueba (ya sabemos que anda)
     HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n--- INICIANDO SISTEMA ---\r\n", 29, HAL_MAX_DELAY);
+
+
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
       uint16_t contador_impresion = 0;
-      // B. Le mandamos el 50% del PWM (4999 sobre el ARR de 9999)
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 2499); // Motor Izquierdo
-      __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999); // Motor Derecho
+
+
       while (1)
       {
-        // Solo procesamos cuando el DMA nos avisa que hay datos frescos
+        // --- 1. TAREAS DE FONDO NO BLOQUEANTES ---
+
+
+
+        // ESP01_Task(); // Descomentar cuando uses WiFi
+        OLED_Task();  // Empuja los gráficos de la RAM a la pantalla por DMA
+
+
+        // --- 2. LÓGICA DE ALTA VELOCIDAD (Disparada por el ADC) ---
+
+        // Solo procesamos si el DMA nos avisa que los 3 sensores tienen datos frescos
         if (adc_listo)
         {
           adc_listo = 0;
           contador_impresion++;
 
-          // 1. Imprimir por USART a la PC (10 veces por segundo)
+          // A. TELEMETRÍA: Se ejecuta 10 veces por segundo (cada 800 lecturas)
           if (contador_impresion >= 800)
           {
             contador_impresion = 0;
+
+            // Actualizamos la pantalla OLED
+            OLED_ShowTelemetry(valores_ir[0], valores_ir[1], valores_ir[2]);
+
+            // Mandamos datos crudos por UART a la PC
             int len = sprintf(uart_buf, "L: %4u | C: %4u | R: %4u\r\n",
                               valores_ir[0], valores_ir[1], valores_ir[2]);
             HAL_UART_Transmit(&huart1, (uint8_t*)uart_buf, len, HAL_MAX_DELAY);
-            if (valores_ir[1] > 500)
-                    {            HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n--- PWM ON ---\r\n", 29, HAL_MAX_DELAY);}else{
-                        HAL_UART_Transmit(&huart1, (uint8_t*)"\r\n--- PWM OFF ---\r\n", 29, HAL_MAX_DELAY);
-                    }
           }
 
-          // 2. LÓGICA DE PRUEBA (Umbral On/Off)
-          // Tomamos el sensor central como referencia. Si querés que active
-          // con CUALQUIERA de los tres, podés cambiar la condición a:
-          // if (valores_ir[0] > 500 || valores_ir[1] > 500 || valores_ir[2] > 500)
-        }
-          if (1)
+          // B. CONTROL DE MOTORES: Reacciona instantáneamente al sensor central
+          if (valores_ir[1] > 500)
           {
-            // A. Configuramos la dirección hacia adelante en el Puente H
+            // 1. Configuramos dirección (Hacia adelante)
             HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
             HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-
             HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
             HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-            // Mensaje de prueba (ya sabemos que anda)
 
-            // B. Le mandamos el 50% del PWM (4999 sobre el ARR de 9999)
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 2499); // Motor Izquierdo
-            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999); // Motor Derecho
+            // 2. Potencia al 50% (4999 sobre 9999)
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 4999); // Izquierdo
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999); // Derecho
           }
+          else
+          {
+            // Si el valor es bajo, frenamos
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
 
-
+            // Cortamos la energía de las bobinas en el puente H
+            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+          }
+        }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -296,6 +345,40 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief I2C1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C1_Init(void)
+{
+
+  /* USER CODE BEGIN I2C1_Init 0 */
+
+  /* USER CODE END I2C1_Init 0 */
+
+  /* USER CODE BEGIN I2C1_Init 1 */
+
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.ClockSpeed = 400000;
+  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C1_Init 2 */
+
+  /* USER CODE END I2C1_Init 2 */
+
+}
+
+/**
   * @brief TIM3 Initialization Function
   * @param None
   * @retval None
@@ -392,7 +475,7 @@ static void MX_TIM4_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_PWM_Init(&htim4) != HAL_OK)
+  if (HAL_TIM_OC_Init(&htim4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -402,18 +485,24 @@ static void MX_TIM4_Init(void)
   {
     Error_Handler();
   }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
   sConfigOC.Pulse = 62;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN TIM4_Init 2 */
+  // Forzamos la configuración del Canal 4 que el CubeMX omitió
 
+    sConfigOC.OCMode = TIM_OCMODE_PWM1; // Modo Output Compare interno
+    sConfigOC.Pulse = 62;                 // Disparo a la mitad del período
+    sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+
+    HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4);
   /* USER CODE END TIM4_Init 2 */
-  HAL_TIM_MspPostInit(&htim4);
 
 }
 
@@ -496,6 +585,9 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel6_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel6_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel6_IRQn);
 
 }
 
@@ -566,6 +658,16 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
     adc_listo = 1; // Le avisamos al while(1) que los datos están listos
   }
 }
+
+// NUEVO: Le avisamos a la librería OLED que el DMA terminó su trabajo
+void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1)
+    {
+        OLED_DMA_Callback();
+    }
+}
+
 /* USER CODE END 4 */
 
 /**
