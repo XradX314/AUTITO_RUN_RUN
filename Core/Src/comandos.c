@@ -5,7 +5,10 @@
 #include <string.h>
 #include <stdio.h>
 #include "main.h" // Para HAL_GetTick()
+#include "Servo.h"
 
+
+extern sServoHandle mi_servo; // Nos "traemos" el servo del main.c
 extern UART_HandleTypeDef huart1; // Para poder usar el UART de la PC acá
 bool pc_conectada = false;
 static uint32_t ultimo_ack_ms = 0;
@@ -28,6 +31,19 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                 UI_AddLog("ENLACE PC: OK");
             }
             break;
+        case CMD_SET_ANGLE:
+                    // Nos aseguramos de que haya llegado al menos 1 byte
+                    if (len >= 1) {
+                        uint8_t angulo_recibido = params[0];
+
+                        // Le pasamos el ángulo directo a tu librería
+                        Servo_SetAngle(&mi_servo, (float)angulo_recibido);
+
+                        // Opcional: Lo mostramos en la OLED para confirmar
+                        sprintf(logMsg, "SERVO: %d GRADOS", angulo_recibido);
+                        UI_AddLog(logMsg);
+                    }
+                    break;
 
         default:
             sprintf(logMsg, "CMD Desconocido: 0x%02X", cmd);

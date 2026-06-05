@@ -10,6 +10,7 @@ CMD_TELEMETRIA = 0x01
 CMD_ACCION     = 0x02
 CMD_ALIVE      = 0x03
 CMD_ALIVE_ACK  = 0x04
+CMD_SET_ANGLE  = 0x05
 
 class CentroControlGUI:
     def __init__(self, root):
@@ -78,6 +79,21 @@ class CentroControlGUI:
         self.lbl_sonar = tk.Label(frame_telemetria, text="----", font=fuente_datos, fg="green")
         self.lbl_sonar.grid(row=3, column=1, sticky="w")
 
+        # --- MARCO DE CONTROL MANUAL ---
+        frame_control = ttk.LabelFrame(self.root, text="Control Manual")
+        frame_control.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(frame_control, text="Radar:").pack(side="left", padx=5)
+        
+        # El Slider va de 0 a 180
+        self.slider_servo = ttk.Scale(frame_control, from_=0, to=180, orient="horizontal", length=250)
+        self.slider_servo.set(90) # Arranca en el centro
+        self.slider_servo.pack(side="left", padx=5, pady=10)
+
+        # Botón para disparar el comando
+        self.btn_servo = ttk.Button(frame_control, text="Mover", command=self.enviar_angulo_servo)
+        self.btn_servo.pack(side="left", padx=5)
+
     def toggle_conexion(self):
         if not self.escuchando:
             try:
@@ -103,6 +119,21 @@ class CentroControlGUI:
             self.entry_port.config(state="normal")
             self.lbl_alive.config(text="DESCONECTADO", fg="red")
             self.robot_addr = None
+
+    def enviar_angulo_servo(self):
+            # Solo mandamos si estamos conectados y sabemos la IP del autito
+            if self.escuchando and self.sock and self.robot_addr:
+                angulo = int(self.slider_servo.get())
+                
+                # struct.pack('<B', angulo) convierte el número entero en 1 byte binario puro (0-255)
+                payload = struct.pack('<B', angulo)
+                
+                # Armamos el paquete con la cabecera, comando 0x05, el byte del ángulo y el Checksum
+                paquete = self.armar_paquete(CMD_SET_ANGLE, payload)
+                
+                # Lo lanzamos por el aire
+                self.sock.sendto(paquete, self.robot_addr)
+                print(f"[>] Ángulo enviado: {angulo}°")
 
     def escuchar_udp(self):
         while self.escuchando:

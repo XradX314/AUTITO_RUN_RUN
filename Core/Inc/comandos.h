@@ -9,7 +9,7 @@
 #define CMD_ACCION      0x02
 #define CMD_ALIVE       0x03
 #define CMD_ALIVE_ACK   0x04
-
+#define CMD_SET_ANGLE   0x05
 
 // Variable global que indica si la PC está viva
 extern bool pc_conectada;

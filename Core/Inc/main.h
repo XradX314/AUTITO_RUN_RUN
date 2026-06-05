@@ -90,6 +90,8 @@ void Error_Handler(void);
 #define IN_2_GPIO_Port GPIOB
 #define IN_1_Pin GPIO_PIN_15
 #define IN_1_GPIO_Port GPIOB
+#define SERVO_Pin GPIO_PIN_8
+#define SERVO_GPIO_Port GPIOA
 #define IN_4_Pin GPIO_PIN_6
 #define IN_4_GPIO_Port GPIOB
 #define IN_3_Pin GPIO_PIN_7
