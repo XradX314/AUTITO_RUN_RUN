@@ -11,22 +11,29 @@ CMD_ACCION     = 0x02
 CMD_ALIVE      = 0x03
 CMD_ALIVE_ACK  = 0x04
 CMD_SET_ANGLE  = 0x05
+CMD_MOTORES    = 0x06
 
 class CentroControlGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Centro de Control - Vehículo Autónomo")
-        self.root.geometry("450x400")
-        self.root.resizable(False, False)
+        # Ventana más grande para que entre todo y permitimos redimensionar
+        self.root.geometry("500x700")
+        self.root.resizable(True, True)
 
         # Variables de estado
         self.escuchando = False
         self.sock = None
         self.robot_addr = None
         self.ultimo_latido = 0
+        self.tecla_apretada = None # Para evitar spam del teclado
 
         self.armar_interfaz()
         self.decodificador = DecodificadorBinario(self.procesar_comando)
+
+        # Binds de teclado para manejar con las flechas
+        self.root.bind("<KeyPress>", self.evento_tecla_presionada)
+        self.root.bind("<KeyRelease>", self.evento_tecla_soltada)
 
         # Iniciar el watchdog del Heartbeat
         self.verificar_conexion()
@@ -34,7 +41,7 @@ class CentroControlGUI:
     def armar_interfaz(self):
         # --- MARCO DE CONEXIÓN ---
         frame_conn = ttk.LabelFrame(self.root, text="Ajustes de Conexión UDP")
-        frame_conn.pack(fill="x", padx=10, pady=10)
+        frame_conn.pack(fill="x", padx=10, pady=5)
 
         ttk.Label(frame_conn, text="Puerto local:").grid(row=0, column=0, padx=5, pady=5)
         self.entry_port = ttk.Entry(frame_conn, width=10)
@@ -54,45 +61,80 @@ class CentroControlGUI:
 
         # --- MARCO DE TELEMETRÍA ---
         frame_telemetria = ttk.LabelFrame(self.root, text="Telemetría en Tiempo Real")
-        frame_telemetria.pack(fill="both", expand=True, padx=10, pady=10)
+        frame_telemetria.pack(fill="x", padx=10, pady=5)
 
-        # Configurar grilla
         for i in range(4):
             frame_telemetria.rowconfigure(i, weight=1)
         frame_telemetria.columnconfigure(1, weight=1)
 
         fuente_datos = ("Consolas", 14, "bold")
 
-        ttk.Label(frame_telemetria, text="IR Izquierdo:", font=("Arial", 11)).grid(row=0, column=0, sticky="e", padx=10)
+        ttk.Label(frame_telemetria, text="IR Izquierdo:", font=("Arial", 11)).grid(row=0, column=0, sticky="e", padx=10, pady=2)
         self.lbl_ir_l = tk.Label(frame_telemetria, text="----", font=fuente_datos, fg="blue")
         self.lbl_ir_l.grid(row=0, column=1, sticky="w")
 
-        ttk.Label(frame_telemetria, text="IR Central:", font=("Arial", 11)).grid(row=1, column=0, sticky="e", padx=10)
+        ttk.Label(frame_telemetria, text="IR Central:", font=("Arial", 11)).grid(row=1, column=0, sticky="e", padx=10, pady=2)
         self.lbl_ir_c = tk.Label(frame_telemetria, text="----", font=fuente_datos, fg="blue")
         self.lbl_ir_c.grid(row=1, column=1, sticky="w")
 
-        ttk.Label(frame_telemetria, text="IR Derecho:", font=("Arial", 11)).grid(row=2, column=0, sticky="e", padx=10)
+        ttk.Label(frame_telemetria, text="IR Derecho:", font=("Arial", 11)).grid(row=2, column=0, sticky="e", padx=10, pady=2)
         self.lbl_ir_r = tk.Label(frame_telemetria, text="----", font=fuente_datos, fg="blue")
         self.lbl_ir_r.grid(row=2, column=1, sticky="w")
 
-        ttk.Label(frame_telemetria, text="Sonar (mm):", font=("Arial", 11)).grid(row=3, column=0, sticky="e", padx=10)
+        ttk.Label(frame_telemetria, text="Sonar (mm):", font=("Arial", 11)).grid(row=3, column=0, sticky="e", padx=10, pady=2)
         self.lbl_sonar = tk.Label(frame_telemetria, text="----", font=fuente_datos, fg="green")
         self.lbl_sonar.grid(row=3, column=1, sticky="w")
 
-        # --- MARCO DE CONTROL MANUAL ---
-        frame_control = ttk.LabelFrame(self.root, text="Control Manual")
+        # --- MARCO DEL SERVO RADAR ---
+        frame_control = ttk.LabelFrame(self.root, text="Control Manual del Radar (Servo)")
         frame_control.pack(fill="x", padx=10, pady=5)
 
-        ttk.Label(frame_control, text="Radar:").pack(side="left", padx=5)
-        
-        # El Slider va de 0 a 180
+        ttk.Label(frame_control, text="Ángulo:").pack(side="left", padx=5)
         self.slider_servo = ttk.Scale(frame_control, from_=0, to=180, orient="horizontal", length=250)
         self.slider_servo.set(90) # Arranca en el centro
         self.slider_servo.pack(side="left", padx=5, pady=10)
 
-        # Botón para disparar el comando
         self.btn_servo = ttk.Button(frame_control, text="Mover", command=self.enviar_angulo_servo)
         self.btn_servo.pack(side="left", padx=5)
+
+        # --- MARCO DE CONDUCCIÓN (MOTORES) ---
+        frame_drive = ttk.LabelFrame(self.root, text="Control de Tracción (Teclado o Mouse)")
+        frame_drive.pack(fill="x", padx=10, pady=5)
+
+        # Slider de velocidad
+        frame_vel = ttk.Frame(frame_drive)
+        frame_vel.pack(side="left", padx=20, pady=10)
+        ttk.Label(frame_vel, text="Velocidad %").pack()
+        self.slider_vel = ttk.Scale(frame_vel, from_=0, to=100, orient="vertical", length=120)
+        self.slider_vel.set(50) # Arrancamos a mitad de potencia
+        self.slider_vel.pack()
+
+        # Cruceta (D-Pad)
+        frame_pad = ttk.Frame(frame_drive)
+        frame_pad.pack(side="right", padx=40, pady=10)
+        
+        btn_fwd = ttk.Button(frame_pad, text="▲", width=5)
+        btn_fwd.grid(row=0, column=1, pady=2)
+        btn_fwd.bind("<ButtonPress-1>", lambda e: self.enviar_motor(1))
+        btn_fwd.bind("<ButtonRelease-1>", lambda e: self.enviar_motor(0))
+        
+        btn_left = ttk.Button(frame_pad, text="◀", width=5)
+        btn_left.grid(row=1, column=0, padx=2)
+        btn_left.bind("<ButtonPress-1>", lambda e: self.enviar_motor(3))
+        btn_left.bind("<ButtonRelease-1>", lambda e: self.enviar_motor(0))
+
+        btn_stop = ttk.Button(frame_pad, text="■", width=5, command=lambda: self.enviar_motor(0))
+        btn_stop.grid(row=1, column=1, padx=2)
+
+        btn_right = ttk.Button(frame_pad, text="▶", width=5)
+        btn_right.grid(row=1, column=2, padx=2)
+        btn_right.bind("<ButtonPress-1>", lambda e: self.enviar_motor(4))
+        btn_right.bind("<ButtonRelease-1>", lambda e: self.enviar_motor(0))
+
+        btn_rev = ttk.Button(frame_pad, text="▼", width=5)
+        btn_rev.grid(row=2, column=1, pady=2)
+        btn_rev.bind("<ButtonPress-1>", lambda e: self.enviar_motor(2))
+        btn_rev.bind("<ButtonRelease-1>", lambda e: self.enviar_motor(0))
 
     def toggle_conexion(self):
         if not self.escuchando:
@@ -120,21 +162,6 @@ class CentroControlGUI:
             self.lbl_alive.config(text="DESCONECTADO", fg="red")
             self.robot_addr = None
 
-    def enviar_angulo_servo(self):
-            # Solo mandamos si estamos conectados y sabemos la IP del autito
-            if self.escuchando and self.sock and self.robot_addr:
-                angulo = int(self.slider_servo.get())
-                
-                # struct.pack('<B', angulo) convierte el número entero en 1 byte binario puro (0-255)
-                payload = struct.pack('<B', angulo)
-                
-                # Armamos el paquete con la cabecera, comando 0x05, el byte del ángulo y el Checksum
-                paquete = self.armar_paquete(CMD_SET_ANGLE, payload)
-                
-                # Lo lanzamos por el aire
-                self.sock.sendto(paquete, self.robot_addr)
-                print(f"[>] Ángulo enviado: {angulo}°")
-
     def escuchar_udp(self):
         while self.escuchando:
             try:
@@ -143,14 +170,11 @@ class CentroControlGUI:
                 for byte in data:
                     self.decodificador.procesar_byte(byte)
             except OSError:
-                break # El socket se cerró
+                break
 
     def procesar_comando(self, cmd, params):
         if cmd == CMD_ALIVE:
-            # Actualizamos el reloj de latido
             self.ultimo_latido = time.time()
-            
-            # Respondemos el ACK
             if self.robot_addr and self.sock:
                 ack_packet = self.armar_paquete(CMD_ALIVE_ACK)
                 self.sock.sendto(ack_packet, self.robot_addr)
@@ -158,7 +182,6 @@ class CentroControlGUI:
         elif cmd == CMD_TELEMETRIA:
             if len(params) == 8:
                 ir_l, ir_c, ir_r, sonar = struct.unpack('<HHHH', params)
-                # Actualizamos la GUI de forma segura
                 self.root.after(0, self.actualizar_pantalla_telemetria, ir_l, ir_c, ir_r, sonar)
 
     def actualizar_pantalla_telemetria(self, l, c, r, s):
@@ -168,16 +191,44 @@ class CentroControlGUI:
         self.lbl_sonar.config(text=str(s))
 
     def verificar_conexion(self):
-        # Se ejecuta cada 500ms en el hilo principal
         if self.escuchando:
             if time.time() - self.ultimo_latido > 1.5:
                 self.lbl_alive.config(text="ENLACE CAÍDO", fg="red")
-                # Limpiar datos viejos
                 self.actualizar_pantalla_telemetria("----", "----", "----", "----")
             else:
                 self.lbl_alive.config(text="ONLINE \u2714", fg="green")
         
         self.root.after(500, self.verificar_conexion)
+
+    def enviar_angulo_servo(self):
+        if self.escuchando and self.sock and self.robot_addr:
+            angulo = int(self.slider_servo.get())
+            payload = struct.pack('<B', angulo)
+            paquete = self.armar_paquete(CMD_SET_ANGLE, payload)
+            self.sock.sendto(paquete, self.robot_addr)
+            print(f"[>] Ángulo enviado: {angulo}°")
+
+    def evento_tecla_presionada(self, event):
+        if self.tecla_apretada == event.keysym:
+            return
+        self.tecla_apretada = event.keysym
+        if event.keysym == "Up":         self.enviar_motor(1)
+        elif event.keysym == "Down":     self.enviar_motor(2)
+        elif event.keysym == "Left":     self.enviar_motor(3)
+        elif event.keysym == "Right":    self.enviar_motor(4)
+
+    def evento_tecla_soltada(self, event):
+        if self.tecla_apretada == event.keysym:
+            self.tecla_apretada = None
+            self.enviar_motor(0) # STOP
+
+    def enviar_motor(self, direccion):
+        if self.escuchando and self.sock and self.robot_addr:
+            velocidad = int(self.slider_vel.get())
+            if direccion == 0: velocidad = 0
+            payload = struct.pack('<BB', direccion, velocidad)
+            paquete = self.armar_paquete(CMD_MOTORES, payload)
+            self.sock.sendto(paquete, self.robot_addr)
 
     def armar_paquete(self, cmd, payload=b""):
         length = 1 + len(payload) + 1

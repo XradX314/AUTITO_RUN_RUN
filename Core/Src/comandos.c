@@ -8,8 +8,11 @@
 #include "Servo.h"
 
 
-extern sServoHandle mi_servo; // Nos "traemos" el servo del main.c
 extern UART_HandleTypeDef huart1; // Para poder usar el UART de la PC acá
+// NUEVO: Le avisamos al compilador que busque a htim3 en otro archivo
+extern TIM_HandleTypeDef htim3;
+
+extern sServoHandle mi_servo; // Nos "traemos" el servo del main.c
 bool pc_conectada = false;
 static uint32_t ultimo_ack_ms = 0;
 
@@ -45,6 +48,70 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                     }
                     break;
 
+        case CMD_MOTORES:
+                    if (len >= 2) {
+                        uint8_t direccion = params[0];
+                        uint8_t velocidad = params[1]; // Viene de 0 a 100
+
+                        // Mapeo de velocidad (0-100%) al rango exacto de tu PWM (0-9999)
+                        uint16_t pwm_val = (velocidad * 9999) / 100;
+
+                        switch(direccion) {
+                            case 0: // STOP - Freno total (Se ejecuta al soltar la tecla/botón)
+                                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+                                UI_AddLog("MOT: STOP");
+                                break;
+
+                            case 1: // ADELANTE
+                                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm_val);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm_val);
+                                UI_AddLog("MOT: ADELANTE");
+                                break;
+
+                            case 2: // ATRÁS (Se invierten los pines IN)
+                                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_SET);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm_val);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm_val);
+                                UI_AddLog("MOT: ATRAS");
+                                break;
+
+                            case 3: // IZQUIERDA (Giro de Tanque)
+                                // Derecha avanza (IN1=1, IN2=0) | Izquierda retrocede (IN3=0, IN4=1)
+                                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_SET);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm_val);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm_val);
+                                UI_AddLog("MOT: IZQ");
+                                break;
+
+                            case 4: // DERECHA (Giro de Tanque)
+                                // Derecha retrocede (IN1=0, IN2=1) | Izquierda avanza (IN3=1, IN4=0)
+                                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+                                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
+                                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm_val);
+                                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm_val);
+                                UI_AddLog("MOT: DER");
+                                break;
+                        }
+                    }
+                    break;
+
         default:
             sprintf(logMsg, "CMD Desconocido: 0x%02X", cmd);
             UI_AddLog(logMsg);
@@ -63,6 +130,14 @@ void Comandos_ChequearTimeout(void) {
     if (pc_conectada && (HAL_GetTick() - ultimo_ack_ms > 1500)) {
         pc_conectada = false;
         UI_AddLog("ENLACE PC: PERDIDO");
+
+        // --- FAILSAFE: CORTAR MOTORES INMEDIATAMENTE ---
+                HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+                HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
     }
 }
 

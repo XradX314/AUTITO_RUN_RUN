@@ -262,10 +262,14 @@ int main(void)
 
 
         // 1. Arrancamos la señal de PWM por hardware del Timer 1
-       HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+          HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 
-        // 2. Iniciamos nuestra librería vinculándola con la función puente
-       Servo_Init(&mi_servo, STM32_SetServoPWM);
+          // 2. Iniciamos nuestra librería vinculándola con la función puente
+          Servo_Init(&mi_servo, STM32_SetServoPWM);
+
+          // 3. NUEVO: Calibración fina del recorrido físico
+          // Valores por defecto: 500 y 2500. Probad abriendo el rango:
+          Servo_Calibrate(&mi_servo, 480, 2550);
 
   /* USER CODE END 2 */
 
@@ -546,7 +550,7 @@ static void MX_TIM1_Init(void)
   htim1.Instance = TIM1;
   htim1.Init.Prescaler = 71;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 19999;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
