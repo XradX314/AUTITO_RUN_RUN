@@ -1,0 +1,6 @@
+../Core/Src/seguidor.c:7:7:Seguidor_GetNorm	32	static
+../Core/Src/seguidor.c:20:6:Seguidor_Girar	16	static
+../Core/Src/seguidor.c:34:6:Seguidor_Task	32	static
+../Core/Src/seguidor.c:84:6:Seguidor_Init	24	static
+../Core/Src/seguidor.c:97:6:Seguidor_Calibrar	24	static
+../Core/Src/seguidor.c:104:6:Seguidor_SetEstado	16	static

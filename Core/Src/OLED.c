@@ -192,6 +192,24 @@ void OLED_DrawHLine(uint8_t x, uint8_t y, uint8_t length, uint8_t color) {
         OLED_DrawPixel(x + i, y, color);
     }
 }
+void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t length, uint8_t color) {
+    for (uint8_t i = 0; i < length; i++) {
+        OLED_DrawPixel(x, y + i, color);
+    }
+}
+
+void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
+    OLED_DrawHLine(x, y, w, color);
+    OLED_DrawHLine(x, y + h - 1, w, color);
+    OLED_DrawVLine(x, y, h, color);
+    OLED_DrawVLine(x + w - 1, y, h, color);
+}
+
+void OLED_FillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
+    for (uint8_t i = 0; i < h; i++) {
+        OLED_DrawHLine(x, y + i, w, color);
+    }
+}
 
 void OLED_PutChar(uint8_t x, uint8_t y, char c, uint8_t size, uint8_t color) {
     if (c < 32 || c > 126) return;

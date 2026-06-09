@@ -32,6 +32,7 @@
 #include "protocolo.h"
 #include "comandos.h"
 #include <Button.h>
+#include "seguidor.h" // ¡Verifica que esté escrito exactamente igual!
 
 
 /* USER CODE END Includes */
@@ -71,6 +72,7 @@ UART_HandleTypeDef huart3;
 uint16_t valores_ir[3]; // [0]=IR_LEFT, [1]=IR_CENTER, [2]=IR_RIGHT
 char uart_buf[50];      // Buffer temporal para el texto de USART
 volatile uint8_t adc_listo = 0; // Flag para avisar que el DMA terminó
+extern uint32_t ultimo_ack_ms;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -99,6 +101,10 @@ uint8_t rx_byte_esp;
 uint16_t distancia_actual_mm = 0;
 // Instancia del sensor
 HCSR04_t mi_sensor_ultra;
+
+sSeguidorHandle mi_seguidor;
+sSeguidorHandle *hSeg_global = &mi_seguidor; // <--- ESTO ES LO QUE LE DA EL VALOR
+bool modo_seguidor_activo = false; // Flag maestro
 
 // --- FUNCIONES PUENTE PARA EL HC-SR04 ---
 
@@ -157,6 +163,7 @@ sButtonHandle btn_sw0 = {
 uint8_t rx_byte_pc;
 
 sServoHandle mi_servo;
+
 // Función puente que le dice a la librería cómo interactuar con tu TIM1
 void STM32_SetServoPWM(uint16_t pulse_us) {
     // Modificamos el registro Compare/Capture directamente para cambiar el ancho de pulso
@@ -269,110 +276,125 @@ int main(void)
 
           // 3. NUEVO: Calibración fina del recorrido físico
           // Valores por defecto: 500 y 2500. Probad abriendo el rango:
-          Servo_Calibrate(&mi_servo, 480, 2550);
+          Servo_Calibrate(&mi_servo, 500, 2400);
+
+          // ... inicializaciones ...
+              Seguidor_Init(&mi_seguidor);
+
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-        uint32_t last_10ms = 0;
-        uint32_t last_20ms_servo = 0;
-        uint32_t last_100ms_ui = 0;
-        uint32_t last_50ms_telem = 0;
+	uint32_t last_10ms = 0;
+	uint32_t last_20ms_servo = 0;
+	uint32_t last_100ms_ui = 0;
+	uint32_t last_50ms_telem = 0;
+	uint32_t last_1ms_ultra = 0;
+	uint32_t last_60ms_ultra = 0;
+	// Antes del while(1) en main.c
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
+
+	while (1)
+	{
+	  uint32_t tick = HAL_GetTick();
+
+	  // 1. SEGURIDAD Y CONTROL DE COMUNICACIÓN
+	  Comandos_ChequearTimeout();
+
+	  // 2. TAREAS NO BLOQUEANTES DE HARDWARE
+	  if (tick - last_10ms >= 10) {
+		  last_10ms = tick;
+		  ESP01_Timeout10ms();
+	  }
+	  ESP01_Task();
+	  OLED_Task();
+	  Button_Task(&btn_sw0);
+	  Decode();
+
+	  // 3. SEGUIMIENTO DE LÍNEA (PRIORIDAD DE COMUNICACIÓN)
+	  // Si la PC ha enviado comandos recientemente, pausamos el seguidor
+	  if (HAL_GetTick() - ultimo_ack_ms > 200) {
+		  Seguidor_Task(&mi_seguidor, valores_ir, 4000);
+	  } else {
+		  // Override: Si la PC tomó el control, el seguidor se desactiva
+		  if (mi_seguidor.estado != ESTADO_SEGUIDOR_OFF) {
+			  Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_OFF);
+		  }
+	  }
+
+	  // 4. SENSOR ULTRASÓNICO
+	  if (tick - last_1ms_ultra >= 1) {
+		  last_1ms_ultra = tick;
+		  HCSR04_TickISR(&mi_sensor_ultra);
+	  }
+	  if (tick - last_60ms_ultra >= 60) {
+		  last_60ms_ultra = tick;
+		  HCSR04_Trigger(&mi_sensor_ultra);
+	  }
+	  HCSR04_EventHandler(&mi_sensor_ultra);
+
+	  // 5. SERVO MOTOR
+	  if (tick - last_20ms_servo >= 20) {
+		  last_20ms_servo = tick;
+		  Servo_Task(&mi_servo);
+	  }
+
+	  // 6. REFRESCO DE PANTALLA (10 FPS)
+	  if (tick - last_100ms_ui >= 100) {
+		  last_100ms_ui = tick;
+		  uint8_t udp_ok = (ESP01_StateUDPTCP() == ESP01_UDPTCP_CONNECTED);
+		  char* ip = ESP01_GetLocalIP();
+		  UI_Render(valores_ir[0], valores_ir[1], valores_ir[2],
+					distancia_actual_mm, ip, udp_ok, pc_conectada, &mi_seguidor);
+	  }
+
+	  // 7. ENVÍO DE TELEMETRÍA (20 FPS)
+	  if (tick - last_50ms_telem >= 50) {
+		  last_50ms_telem = tick;
+		  Comandos_EnviarAlive();
+		  Comandos_EnviarTelemetria(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm);
+		  Comandos_FlushTx();
+	  }
 
 
-        // Nuevos contadores para el sensor
-          uint32_t last_1ms_ultra = 0;
-          uint32_t last_60ms_ultra = 0;
+	  // Dentro del main.c, en el while(1), abajo de todo
+	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_RUNNING) {
+	      // Si estamos en running, los motores DEBEN estar configurados en modo ADELANTE
+	      HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
+	      HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+	      HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
+	      HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+	  }
 
-        while (1)
-        {
-            uint32_t tick = HAL_GetTick();
+	  // Dentro del main.c, en el while(1)
+	  if (adc_listo) {
+	      adc_listo = 0; // Reset flag
+	      // Disparamos la siguiente conversión para que el DMA no se detenga
+	      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
+	  }
 
-            // --- NUEVO: VIGILANCIA DE CONEXIÓN CONSTANTE ---
-            Comandos_ChequearTimeout();
+	  // Lógica Seguidor: Pasamos los valores_ir que el DMA acaba de llenar
+	  Seguidor_Task(&mi_seguidor, valores_ir, 4000);
+	  // LÓGICA DE TRANSICIÓN SEGURA
+	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_CALIBRANDO) {
+	      // Si pasaron 20 segundos
+	      if (HAL_GetTick() - mi_seguidor.tiempo_inicio_cal > 20000) {
+	          mi_seguidor.estado = ESTADO_SEGUIDOR_RUNNING;
+	          UI_AddLog("SEG: RUNNING");
+	      }
+	  }
 
-            // --- 1. TAREAS DEL SENSOR ULTRASÓNICO ---
-
-                  // A. Mantenimiento del pulso (Se ejecuta cada 1ms)
-                  if (tick - last_1ms_ultra >= 1) {
-                      last_1ms_ultra = tick;
-                      HCSR04_TickISR(&mi_sensor_ultra);
-                  }
-
-                  // B. Pedir medición nueva (Se ejecuta cada 60ms para evitar eco fantasma)
-                  if (tick - last_60ms_ultra >= 60) {
-                      last_60ms_ultra = tick;
-                      HCSR04_Trigger(&mi_sensor_ultra);
-                  }
-
-                  // C. Procesar datos (Se ejecuta siempre, no bloquea)
-                  HCSR04_EventHandler(&mi_sensor_ultra);
-
-                  // --- ACTUALIZACIÓN DE MOVIMIENTO DEL SERVO ---
-                        if (tick - last_20ms_servo >= 20) {
-                            last_20ms_servo = tick;
-                            Servo_Task(&mi_servo);
-                        }
-
-            // 1. TAREAS NO BLOQUEANTES DE HARDWARE
-            if (tick - last_10ms >= 10) {
-                last_10ms = tick;
-                ESP01_Timeout10ms();
-            }
-            ESP01_Task();
-            OLED_Task();
-            Button_Task(&btn_sw0);
-            Decode(); // Constantemente mastica los bytes que van llegando al RingBuffer
-
-            // 2. REFRESCO DE PANTALLA (A 10 FPS)
-            if (tick - last_100ms_ui >= 100) {
-                last_100ms_ui = tick;
-
-                uint8_t udp_ok = (ESP01_StateUDPTCP() == ESP01_UDPTCP_CONNECTED);
-                char* ip = ESP01_GetLocalIP();
-                // Llama a la función pasándole los 7 parámetros exactos:
-                          UI_Render(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm, ip, udp_ok, pc_conectada);
-            }
-
-            // 3. ENVÍO DE TELEMETRÍA LENTA (A 2 FPS)
-            if (tick - last_50ms_telem >= 50) {
-                last_50ms_telem = tick;
+	  // LÓGICA DE EJECUCIÓN (Llamamos a la tarea)
+	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_RUNNING) {
+	      Seguidor_Task(&mi_seguidor, valores_ir, 4000);
+	  } else if (mi_seguidor.estado == ESTADO_SEGUIDOR_CALIBRANDO) {
+	      // Solo calibrar si no hay comandos manuales (para evitar el override)
+	      Seguidor_Calibrar(&mi_seguidor, valores_ir);
+	  }
 
 
-                // 1. Cargamos el latido en el buffer
-                          Comandos_EnviarAlive();
-
-                // Ya no usamos sprintf(). Generamos el paquete binario en el buffer TX.
-                          Comandos_EnviarTelemetria(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm);
-
-                          // Y forzamos que se envíe por el aire/cable
-                          Comandos_FlushTx();
-            }
-
-            // 4. LÓGICA DE ALTA VELOCIDAD Y MOTORES (Disparada por el ADC)
-            if (adc_listo)
-            {
-                adc_listo = 0;
-
-                // Reacción instantánea del puente H al sensor
-//                if (valores_ir[1] > 500) {
-//                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 4999);
-//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4999);
-//                } else {
-//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
-//                    __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
-//                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
-//                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-//                }
-            }
-    /* USER CODE END WHILE */
+	/* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
 

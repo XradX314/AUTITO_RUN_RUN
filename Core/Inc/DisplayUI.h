@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "seguidor.h"
 
 // Banderas globales controladas por el menú de ajustes
 extern bool ui_enable_uart;
@@ -18,6 +19,9 @@ void UI_LongClick(void);
 // Funciones para inyectarle datos a la pantalla desde el main
 void UI_AddLog(const char* texto);
 // Modificá la línea de UI_Render para que quede así:
-void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, const char* ip, uint8_t is_udp_connected, bool is_pc_connected);
+void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, const char* ip, uint8_t is_udp_connected, bool is_pc_connected, sSeguidorHandle *hSeg);
+// Funciones para lanzar pop-ups flotantes
+void UI_PopupServo(uint8_t angulo);
+void UI_PopupMotor(uint8_t direccion, uint8_t velocidad);
 
 #endif /* DISPLAYUI_H_ */

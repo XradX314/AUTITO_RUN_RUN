@@ -1,5 +1,7 @@
-../Core/Src/DisplayUI.c:26:6:UI_Init	4	static
-../Core/Src/DisplayUI.c:32:6:UI_ShortClick	4	static
-../Core/Src/DisplayUI.c:41:6:UI_LongClick	4	static
-../Core/Src/DisplayUI.c:62:6:UI_AddLog	56	static
-../Core/Src/DisplayUI.c:77:6:UI_Render	72	static
+../Core/Src/DisplayUI.c:33:6:UI_Init	4	static
+../Core/Src/DisplayUI.c:38:6:UI_PopupServo	16	static
+../Core/Src/DisplayUI.c:44:6:UI_PopupMotor	16	static
+../Core/Src/DisplayUI.c:52:6:UI_ShortClick	4	static
+../Core/Src/DisplayUI.c:62:6:UI_LongClick	8	static
+../Core/Src/DisplayUI.c:89:6:UI_AddLog	56	static
+../Core/Src/DisplayUI.c:100:6:UI_Render	112	static

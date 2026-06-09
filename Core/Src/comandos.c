@@ -8,13 +8,16 @@
 #include "Servo.h"
 
 
+// Asegurate de tener el acceso al handler del seguidor
+extern sSeguidorHandle mi_seguidor;
+
 extern UART_HandleTypeDef huart1; // Para poder usar el UART de la PC acá
 // NUEVO: Le avisamos al compilador que busque a htim3 en otro archivo
 extern TIM_HandleTypeDef htim3;
 
 extern sServoHandle mi_servo; // Nos "traemos" el servo del main.c
 bool pc_conectada = false;
-static uint32_t ultimo_ack_ms = 0;
+uint32_t ultimo_ack_ms = 0;
 
 // ---- RECEPTOR: ¿Qué hacemos cuando llega un paquete válido? ----
 void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
@@ -45,6 +48,9 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                         // Opcional: Lo mostramos en la OLED para confirmar
                         sprintf(logMsg, "SERVO: %d GRADOS", angulo_recibido);
                         UI_AddLog(logMsg);
+
+                        // DISPARAR CARTEL:
+                        UI_PopupServo(angulo_recibido);
                     }
                     break;
 
@@ -109,8 +115,37 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                                 UI_AddLog("MOT: DER");
                                 break;
                         }
+
+                        // DISPARAR CARTEL (Afuera del switch interior, pero dentro del IF)
+                        UI_PopupMotor(direccion, velocidad);
                     }
                     break;
+
+        case CMD_SEGUIDOR_CTRL:
+            if (len >= 1) {
+                uint8_t accion = params[0];
+                if (accion == 0) {
+                    Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_OFF);
+                    UI_AddLog("SEG: STOPPED");
+                } else if (accion == 1) {
+                    Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_CALIBRANDO);
+                    UI_AddLog("SEG: CALIBRANDO");
+                } else if (accion == 2) {
+                    mi_seguidor.estado = ESTADO_SEGUIDOR_RUNNING;
+                    UI_AddLog("SEG: RUNNING");
+                }
+            }
+            break;
+
+        case CMD_SEGUIDOR_PID:
+            if (len >= 12) { // 3 floats de 4 bytes = 12 bytes
+                memcpy(&mi_seguidor.Kp, &params[0], 4);
+                memcpy(&mi_seguidor.Ki, &params[4], 4);
+                memcpy(&mi_seguidor.Kd, &params[8], 4);
+                UI_AddLog("PID ACTUALIZADO");
+            }
+            break;
+
 
         default:
             sprintf(logMsg, "CMD Desconocido: 0x%02X", cmd);

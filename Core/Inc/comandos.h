@@ -11,9 +11,12 @@
 #define CMD_ALIVE_ACK   0x04
 #define CMD_SET_ANGLE   0x05
 #define CMD_MOTORES 	0x06
+#define CMD_SEGUIDOR_CTRL 0x07 // Payload: [0=STOP, 1=START_CALIB, 2=RUN]
+#define CMD_SEGUIDOR_PID  0x08 // Payload: [Kp(4 bytes), Ki(4 bytes), Kd(4 bytes)]
 
 // Variable global que indica si la PC está viva
 extern bool pc_conectada;
+extern uint32_t ultimo_ack_ms; // Asegúrate que esta línea exista en el header
 
 // Estructura empaquetada para mandar toda la telemetría en un solo bloque de bytes
 typedef struct {

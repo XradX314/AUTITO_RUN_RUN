@@ -5,6 +5,9 @@
 ../Core/Src/OLED.c:175:6:OLED_Clear	1
 ../Core/Src/OLED.c:179:6:OLED_DrawPixel	4
 ../Core/Src/OLED.c:190:6:OLED_DrawHLine	2
-../Core/Src/OLED.c:196:6:OLED_PutChar	9
-../Core/Src/OLED.c:218:6:OLED_Print	2
-../Core/Src/OLED.c:231:6:OLED_ShowTelemetry	1
+../Core/Src/OLED.c:195:6:OLED_DrawVLine	2
+../Core/Src/OLED.c:201:6:OLED_DrawRect	1
+../Core/Src/OLED.c:208:6:OLED_FillRect	2
+../Core/Src/OLED.c:214:6:OLED_PutChar	9
+../Core/Src/OLED.c:236:6:OLED_Print	2
+../Core/Src/OLED.c:249:6:OLED_ShowTelemetry	1

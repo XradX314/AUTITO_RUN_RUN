@@ -1,5 +1,5 @@
-../Core/Src/comandos.c:20:6:Comandos_Parsear	56	static
-../Core/Src/comandos.c:123:6:Comandos_EnviarAlive	8	static
-../Core/Src/comandos.c:128:6:Comandos_ChequearTimeout	8	static
-../Core/Src/comandos.c:145:6:Comandos_EnviarTelemetria	32	static
-../Core/Src/comandos.c:157:6:Comandos_FlushTx	16	static
+../Core/Src/comandos.c:23:6:Comandos_Parsear	56	static
+../Core/Src/comandos.c:158:6:Comandos_EnviarAlive	8	static
+../Core/Src/comandos.c:163:6:Comandos_ChequearTimeout	8	static
+../Core/Src/comandos.c:180:6:Comandos_EnviarTelemetria	32	static
+../Core/Src/comandos.c:192:6:Comandos_FlushTx	16	static

@@ -105,7 +105,7 @@ class CentroControlGUI:
         frame_vel = ttk.Frame(frame_drive)
         frame_vel.pack(side="left", padx=20, pady=10)
         ttk.Label(frame_vel, text="Velocidad %").pack()
-        self.slider_vel = ttk.Scale(frame_vel, from_=0, to=100, orient="vertical", length=120)
+        self.slider_vel = ttk.Scale(frame_vel, from_=100, to=0, orient="vertical", length=120)
         self.slider_vel.set(50) # Arrancamos a mitad de potencia
         self.slider_vel.pack()
 
@@ -135,6 +135,20 @@ class CentroControlGUI:
         btn_rev.grid(row=2, column=1, pady=2)
         btn_rev.bind("<ButtonPress-1>", lambda e: self.enviar_motor(2))
         btn_rev.bind("<ButtonRelease-1>", lambda e: self.enviar_motor(0))
+
+        # --- MARCO DE SEGUIDOR ---
+        frame_seguidor = ttk.LabelFrame(self.root, text="Seguidor de Línea")
+        frame_seguidor.pack(fill="x", padx=10, pady=5)
+
+        ttk.Button(frame_seguidor, text="Detener", command=lambda: self.enviar_seguidor(0)).pack(side="left", padx=5)
+        ttk.Button(frame_seguidor, text="Calibrar", command=lambda: self.enviar_seguidor(1)).pack(side="left", padx=5)
+        ttk.Button(frame_seguidor, text="Iniciar", command=lambda: self.enviar_seguidor(2)).pack(side="left", padx=5)
+
+    def enviar_seguidor(self, accion):
+        if self.escuchando and self.sock and self.robot_addr:
+            payload = struct.pack('<B', accion)
+            paquete = self.armar_paquete(CMD_SEGUIDOR_CTRL, payload)
+            self.sock.sendto(paquete, self.robot_addr)
 
     def toggle_conexion(self):
         if not self.escuchando:
