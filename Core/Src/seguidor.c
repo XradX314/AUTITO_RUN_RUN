@@ -160,28 +160,33 @@ void Seguidor_Task(sSeguidorHandle *hSeg, uint16_t *vals, uint16_t vel_base) {
                 break;
 
             case ESTADO_RESCATE_GIRO_BUSQUEDA:
-                // 1. Pivotar sobre su propio eje hacia el último lado conocido de la pista
-                if (hSeg->ultimo_lado_giro == 0) { // Girar a la izquierda
-                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET); // Izq Atrás
-                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_SET);
-                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);   // Der Adelante
-                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-                } else { // Girar a la derecha
-                    HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);   // Izq Adelante
-                    HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-                    HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET); // Der Atrás
-                    HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_SET);
-                }
+				// 1. Configuración de pines (Igual que antes)
+				if (hSeg->ultimo_lado_giro == 0) { // Girar a la izquierda
+					HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET); // Izq Atrás
+					HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_SET);
+					HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);   // Der Adelante
+					HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
 
-                // Velocidad de giro moderada
-                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 4000);
-                __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 4000);
+					// --- VELOCIDAD ASIMÉTRICA ---
+					__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 3000); // Izq atrás (suave)
+					__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 6000); // Der adelante (fuerte)
+				}
+				else { // Girar a la derecha
+					HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);   // Izq Adelante
+					HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+					HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET); // Der Atrás
+					HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_SET);
 
-                // 2. CRITERIO DE SALIDA: Dejamos de pivotar cuando el sensor CENTRAL vuelve a morder negro (< 0.30f)
-                if (Seguidor_GetNorm(hSeg, vals[1], 1) < 0.30f) {
-                    hSeg->estado = ESTADO_SEGUIDOR_RUNNING;
-                }
-                break;
+					// --- VELOCIDAD ASIMÉTRICA ---
+					__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 6000); // Izq adelante (fuerte)
+					__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 3000); // Der atrás (suave)
+				}
+
+				// 2. Criterio de salida
+				if (Seguidor_GetNorm(hSeg, vals[1], 1) < 0.45f) {
+					hSeg->estado = ESTADO_SEGUIDOR_RUNNING;
+				}
+				break;
     case ESTADO_SEGUIDOR_OFF:
                 // 1. Apagamos los motores una única vez
                 Seguidor_Girar(0);
