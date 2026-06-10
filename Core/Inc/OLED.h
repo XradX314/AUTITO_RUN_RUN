@@ -28,6 +28,7 @@ void OLED_DrawPixel(uint8_t x, uint8_t y, uint8_t color);
 void OLED_DrawHLine(uint8_t x, uint8_t y, uint8_t length, uint8_t color);
 void OLED_DrawVLine(uint8_t x, uint8_t y, uint8_t length, uint8_t color);
 void OLED_DrawRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);
+void OLED_DrawCircle(int32_t x0, int32_t y0, int32_t radius, uint8_t color);
 void OLED_FillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color);
 
 // Texto y Telemetría

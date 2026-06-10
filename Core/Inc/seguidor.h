@@ -5,9 +5,14 @@
 #include <stdbool.h>
 
 typedef enum {
-    ESTADO_SEGUIDOR_OFF,
+	ESTADO_SEGUIDOR_OFF,      // Apaga todo una sola vez
+	ESTADO_SEGUIDOR_INACTIVO, // Estado de reposo absoluto (No pisa los PWM)
     ESTADO_SEGUIDOR_CALIBRANDO,
-    ESTADO_SEGUIDOR_RUNNING
+    ESTADO_SEGUIDOR_RUNNING,
+	// --- NUEVOS ESTADOS DE RESCATE ---
+	ESTADO_RESCATE_REVERSA,
+	ESTADO_RESCATE_ESPERA_FIJA,
+	ESTADO_RESCATE_GIRO_BUSQUEDA
 } eSeguidorEstado;
 
 typedef struct {
@@ -20,6 +25,8 @@ typedef struct {
     uint16_t max_cal[3];
     eSeguidorEstado estado;
     uint32_t tiempo_inicio_cal;
+    uint8_t ultimo_lado_giro; // 0 = Izquierda, 1 = Derecha
+    uint32_t rescate_timer;
 } sSeguidorHandle;
 
 void Seguidor_Init(sSeguidorHandle *hSeg);

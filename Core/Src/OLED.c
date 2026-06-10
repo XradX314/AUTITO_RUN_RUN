@@ -211,6 +211,34 @@ void OLED_FillRect(uint8_t x, uint8_t y, uint8_t w, uint8_t h, uint8_t color) {
     }
 }
 
+void OLED_DrawCircle(int32_t x0, int32_t y0, int32_t radius, uint8_t color) {
+    int32_t x = radius;
+    int32_t y = 0;
+    int32_t err = 0;
+
+    while (x >= y) {
+        // Aprovechamos la simetría de 8 octantes del círculo
+        OLED_DrawPixel(x0 + x, y0 + y, color);
+        OLED_DrawPixel(x0 + y, y0 + x, color);
+        OLED_DrawPixel(x0 - y, y0 + x, color);
+        OLED_DrawPixel(x0 - x, y0 + y, color);
+        OLED_DrawPixel(x0 - x, y0 - y, color);
+        OLED_DrawPixel(x0 - y, y0 - x, color);
+        OLED_DrawPixel(x0 + y, y0 - x, color);
+        OLED_DrawPixel(x0 + x, y0 - y, color);
+
+        if (err <= 0) {
+            y += 1;
+            err += 2 * y + 1;
+        }
+
+        if (err > 0) {
+            x -= 1;
+            err -= 2 * x + 1;
+        }
+    }
+}
+
 void OLED_PutChar(uint8_t x, uint8_t y, char c, uint8_t size, uint8_t color) {
     if (c < 32 || c > 126) return;
 

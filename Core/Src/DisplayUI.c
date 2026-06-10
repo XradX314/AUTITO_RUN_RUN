@@ -25,10 +25,10 @@ bool ui_enable_udp = true;
 static char esp_log[6][22] = {"", "", "", "", "", ""};
 
 // --- VARIABLES DEL SISTEMA POP-UP ---
-static uint32_t popup_timer = 0;
-static uint8_t popup_activo = 0; // 0=Nada, 1=Servo, 2=Motor
-static uint8_t pop_val1 = 0;
-static uint8_t pop_val2 = 0;
+uint32_t popup_timer = 0;
+uint8_t popup_activo = 0; // 0=Nada, 1=Servo, 2=Motor
+uint8_t pop_val1 = 0;
+uint8_t pop_val2 = 0;
 
 void UI_Init(void) {
     current_state = STATE_MAIN_MENU;
@@ -118,7 +118,6 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
 
                     if (hSeg->estado == ESTADO_SEGUIDOR_CALIBRANDO) {
                         // --- AQUÍ PEGÁS LA CUENTA REGRESIVA ---
-                        uint32_t tiempo_transcurrido = HAL_GetTick() - hSeg->tiempo_inicio_cal;
                         // Asegurate que sea signed para que no de valores astronómicos al bajar de 0
                         int32_t seg_restantes = 20 - ((int32_t)(HAL_GetTick() - hSeg->tiempo_inicio_cal) / 1000);
                         if (seg_restantes < 0) seg_restantes = 0;
@@ -235,6 +234,27 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
                 OLED_DrawRect(ox+14, oy+2 - ofs, 3, 4, 1);
                 OLED_DrawRect(ox+1, oy+10 + ofs, 3, 4, 1);
                 OLED_DrawRect(ox+14, oy+10 + ofs, 3, 4, 1);
+            } else if (popup_activo == 3) {
+                // --- POPUP CALIBRACIÓN (Cuenta regresiva y animación) ---
+                sprintf(popMsg, "BARRIDO:");
+                OLED_Print(45, 18, popMsg, 1, 1);
+
+                // pop_val1 va a contener los segundos restantes
+                sprintf(popMsg, "%d seg", pop_val1);
+                OLED_Print(45, 30, popMsg, 1, 1);
+
+                // Icono de un Reloj / Cronómetro (Dibujo estático con aguja animada)
+                uint8_t ox = 22; uint8_t oy = 24;
+                OLED_DrawCircle(ox, oy, 7, 1);       // Cuerpo del reloj
+                OLED_DrawHLine(ox-3, oy-9, 7, 1);     // Botón superior
+                OLED_DrawVLine(ox, oy-9, 2, 1);       // Eje del botón
+
+                // Aguja animada: gira en 4 posiciones según el tiempo
+                uint8_t fase = (HAL_GetTick() / 250) % 4;
+                if (fase == 0)      OLED_DrawVLine(ox, oy-4, 4, 1); // Apunta arriba
+                else if (fase == 1) OLED_DrawHLine(ox, oy, 4, 1);   // Apunta derecha
+                else if (fase == 2) OLED_DrawVLine(ox, oy, 4, 1);   // Apunta abajo
+                else                OLED_DrawHLine(ox-4, oy, 4, 1); // Apunta izquierda
             }
         }
     }

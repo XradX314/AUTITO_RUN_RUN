@@ -246,10 +246,10 @@ int main(void)
 
 
       // 3. Configurá acá tu red de WiFi local
-      ESP01_SetWIFI("Elstein-fibra", "sanluis_1509");
+      ESP01_SetWIFI("FCAL", "fcalconcordia.06-2019");
 
       // 4. (Opcional) Si vas a mandar telemetría a tu PC, poné la IP de tu compu
-      ESP01_StartUDP("192.168.0.23", 8080, 8080);
+      ESP01_StartUDP("172.23.211.216", 8080, 8080);
 
 
       Button_Init(&btn_sw0);
@@ -313,15 +313,8 @@ int main(void)
 	  Decode();
 
 	  // 3. SEGUIMIENTO DE LÍNEA (PRIORIDAD DE COMUNICACIÓN)
-	  // Si la PC ha enviado comandos recientemente, pausamos el seguidor
-	  if (HAL_GetTick() - ultimo_ack_ms > 200) {
+
 		  Seguidor_Task(&mi_seguidor, valores_ir, 4000);
-	  } else {
-		  // Override: Si la PC tomó el control, el seguidor se desactiva
-		  if (mi_seguidor.estado != ESTADO_SEGUIDOR_OFF) {
-			  Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_OFF);
-		  }
-	  }
 
 	  // 4. SENSOR ULTRASÓNICO
 	  if (tick - last_1ms_ultra >= 1) {

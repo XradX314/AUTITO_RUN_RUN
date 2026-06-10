@@ -4,4 +4,4 @@
 ../Core/Src/DisplayUI.c:52:6:UI_ShortClick	4
 ../Core/Src/DisplayUI.c:62:6:UI_LongClick	16
 ../Core/Src/DisplayUI.c:89:6:UI_AddLog	6
-../Core/Src/DisplayUI.c:100:6:UI_Render	27
+../Core/Src/DisplayUI.c:100:6:UI_Render	31

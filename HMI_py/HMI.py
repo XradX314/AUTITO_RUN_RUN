@@ -12,6 +12,8 @@ CMD_ALIVE      = 0x03
 CMD_ALIVE_ACK  = 0x04
 CMD_SET_ANGLE  = 0x05
 CMD_MOTORES    = 0x06
+CMD_SEGUIDOR_CTRL = 0x07  # Asegúrate que coincida con el ID en tu comandos.c
+CMD_SEGUIDOR_PID = 0x08  # Asegúrate que coincida con el ID en tu comandos.c
 
 class CentroControlGUI:
     def __init__(self, root):
@@ -143,6 +145,39 @@ class CentroControlGUI:
         ttk.Button(frame_seguidor, text="Detener", command=lambda: self.enviar_seguidor(0)).pack(side="left", padx=5)
         ttk.Button(frame_seguidor, text="Calibrar", command=lambda: self.enviar_seguidor(1)).pack(side="left", padx=5)
         ttk.Button(frame_seguidor, text="Iniciar", command=lambda: self.enviar_seguidor(2)).pack(side="left", padx=5)
+
+
+# --- MARCO DE PID ---
+        frame_pid = ttk.LabelFrame(self.root, text="Ajustes PID (En caliente)")
+        frame_pid.pack(fill="x", padx=10, pady=5)
+
+        ttk.Label(frame_pid, text="Kp:").grid(row=0, column=0)
+        self.entry_kp = ttk.Entry(frame_pid, width=8); self.entry_kp.insert(0, "2000.0"); self.entry_kp.grid(row=0, column=1)
+        
+        ttk.Label(frame_pid, text="Ki:").grid(row=0, column=2)
+        self.entry_ki = ttk.Entry(frame_pid, width=8); self.entry_ki.insert(0, "0.05"); self.entry_ki.grid(row=0, column=3)
+        
+        ttk.Label(frame_pid, text="Kd:").grid(row=1, column=0)
+        self.entry_kd = ttk.Entry(frame_pid, width=8); self.entry_kd.insert(0, "500.0"); self.entry_kd.grid(row=1, column=1)
+        
+        ttk.Button(frame_pid, text="Enviar PID", command=self.enviar_pid_update).grid(row=1, column=2, columnspan=2)
+
+
+    def enviar_pid_update(self):
+        if self.escuchando and self.sock and self.robot_addr:
+            try:
+                kp = float(self.entry_kp.get())
+                ki = float(self.entry_ki.get())
+                kd = float(self.entry_kd.get())
+                
+                # Empaquetar 3 floats (12 bytes)
+                payload = struct.pack('<fff', kp, ki, kd)
+                paquete = self.armar_paquete(CMD_SEGUIDOR_PID, payload)
+                
+                self.sock.sendto(paquete, self.robot_addr)
+                print(f"[PID] Enviado: Kp={kp}, Ki={ki}, Kd={kd}")
+            except ValueError:
+                print("[!] Error en los valores del PID")
 
     def enviar_seguidor(self, accion):
         if self.escuchando and self.sock and self.robot_addr:
