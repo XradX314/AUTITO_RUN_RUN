@@ -77,8 +77,7 @@ void UI_LongClick(void) {
     else if (current_state == STATE_SEGUIDOR) {
         if (settings_idx == 0) {
             // Toggle de estado: Cicla entre OFF -> CALIBRANDO -> RUNNING -> OFF
-            if (hSeg_global->estado == ESTADO_SEGUIDOR_OFF) Seguidor_SetEstado(hSeg_global, ESTADO_SEGUIDOR_CALIBRANDO);
-            else Seguidor_SetEstado(hSeg_global, ESTADO_SEGUIDOR_OFF);
+
         } else if (settings_idx == 1) {
             current_state = STATE_MAIN_MENU; // Volver al menú principal
             settings_idx = 0; // Resetear índice del submenú
@@ -116,20 +115,7 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
                     OLED_Print(20, 0, "SEGUIDOR LINEA", 1, 1);
                     OLED_DrawHLine(0, 10, 128, 1);
 
-                    if (hSeg->estado == ESTADO_SEGUIDOR_CALIBRANDO) {
-                        // --- AQUÍ PEGÁS LA CUENTA REGRESIVA ---
-                        // Asegurate que sea signed para que no de valores astronómicos al bajar de 0
-                        int32_t seg_restantes = 20 - ((int32_t)(HAL_GetTick() - hSeg->tiempo_inicio_cal) / 1000);
-                        if (seg_restantes < 0) seg_restantes = 0;
 
-                        sprintf(buf, "BARRIDO: %lds", (long)seg_restantes);
-                        OLED_Print(10, 20, buf, 1, 1);
-                    } else {
-                        // Mostrar estado normal cuando no está calibrando
-                        const char* est = (hSeg->estado == ESTADO_SEGUIDOR_RUNNING) ? "RUNNING" : "STOPPED";
-                        sprintf(buf, "ESTADO: %s", est);
-                        OLED_Print(10, 20, buf, 1, 1);
-                    }
 
                     OLED_Print(10, 35, "VOLVER", 1, 1);
                     OLED_Print(0, 20 + (settings_idx * 15), ">", 1, 1);

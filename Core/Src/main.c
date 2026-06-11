@@ -103,8 +103,6 @@ uint16_t distancia_actual_mm = 0;
 HCSR04_t mi_sensor_ultra;
 
 sSeguidorHandle mi_seguidor;
-sSeguidorHandle *hSeg_global = &mi_seguidor; // <--- ESTO ES LO QUE LE DA EL VALOR
-bool modo_seguidor_activo = false; // Flag maestro
 
 // --- FUNCIONES PUENTE PARA EL HC-SR04 ---
 
@@ -246,10 +244,10 @@ int main(void)
 
 
       // 3. Configurá acá tu red de WiFi local
-      ESP01_SetWIFI("FCAL", "fcalconcordia.06-2019");
+      ESP01_SetWIFI("Elstein-fibra", "sanluis_1509");
 
       // 4. (Opcional) Si vas a mandar telemetría a tu PC, poné la IP de tu compu
-      ESP01_StartUDP("172.23.211.216", 8080, 8080);
+      ESP01_StartUDP("192.168.0.19", 8080, 8080);
 
 
       Button_Init(&btn_sw0);
@@ -276,10 +274,20 @@ int main(void)
 
           // 3. NUEVO: Calibración fina del recorrido físico
           // Valores por defecto: 500 y 2500. Probad abriendo el rango:
-          Servo_Calibrate(&mi_servo, 500, 2400);
+          Servo_Calibrate(&mi_servo, 544, 2400);
 
           // ... inicializaciones ...
               Seguidor_Init(&mi_seguidor);
+              // 2. Valores base agresivos de competición para morder la U grande:
+                // (Nota: Estos valores viajan fijos al arrancar, pero después los podés pisar desde la HMI)
+                mi_seguidor.Kp = 10;        // Proporcional intermedio para la escala 0-2000
+                mi_seguidor.Ki = 0;         // Integral en 0 absoluto para evitar trompos en la U
+                mi_seguidor.Kd = 40;        // Derivativo alto para amortiguar el chasis
+
+                // Ajuste inercial del interceptor bloqueante de 90°:
+                mi_seguidor.pwm_giro_ext = 7800;  // La rueda de afuera empuja con fuerza sorda
+                mi_seguidor.pwm_giro_int = -1500; // La rueda de adentro va EN REVERSA activa (Giro tanque)
+
 
 
   /* USER CODE END 2 */
@@ -291,102 +299,75 @@ int main(void)
 	uint32_t last_100ms_ui = 0;
 	uint32_t last_50ms_telem = 0;
 	uint32_t last_1ms_ultra = 0;
-	uint32_t last_60ms_ultra = 0;
+	uint32_t last_100ms_ultra = 0;
 	// Antes del while(1) en main.c
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
 
 	while (1)
 	{
-	  uint32_t tick = HAL_GetTick();
+		uint32_t tick = HAL_GetTick();
 
-	  // 1. SEGURIDAD Y CONTROL DE COMUNICACIÓN
-	  Comandos_ChequearTimeout();
+			  // 1. SEGURIDAD Y CONTROL DE COMUNICACIÓN
+			  Comandos_ChequearTimeout();
 
-	  // 2. TAREAS NO BLOQUEANTES DE HARDWARE
-	  if (tick - last_10ms >= 10) {
-		  last_10ms = tick;
-		  ESP01_Timeout10ms();
-	  }
-	  ESP01_Task();
-	  OLED_Task();
-	  Button_Task(&btn_sw0);
-	  Decode();
+			  // 2. TAREAS NO BLOQUEANTES DE HARDWARE (Se ejecutan libres)
+			  ESP01_Task();
+			  OLED_Task();
+			  Button_Task(&btn_sw0);
+			  Decode();
+			  HCSR04_EventHandler(&mi_sensor_ultra);
 
-	  // 3. SEGUIMIENTO DE LÍNEA (PRIORIDAD DE COMUNICACIÓN)
+			  // Base de tiempos de 10ms para comunicaciones pesadas
+			  if (tick - last_10ms >= 10) {
+				  last_10ms = tick;
+				  ESP01_Timeout10ms();
+			  }
 
-		  Seguidor_Task(&mi_seguidor, valores_ir, 4000);
+			  // 3. MAQUINA DE ESTADOS DEL SEGUIDOR DE LÍNEA (¡UNA SOLA LLAMADA COMPLETA!)
+		      // El control de avance de pines se maneja ADENTRO de seguidor.c, no acá.
+			  Seguidor_Task(&mi_seguidor, valores_ir, 6200);
+			  if (mi_seguidor.modo_calibracion == 1) {
+			      Seguidor_Calibrar(&mi_seguidor, valores_ir);
+			  }
 
-	  // 4. SENSOR ULTRASÓNICO
-	  if (tick - last_1ms_ultra >= 1) {
-		  last_1ms_ultra = tick;
-		  HCSR04_TickISR(&mi_sensor_ultra);
-	  }
-	  if (tick - last_60ms_ultra >= 60) {
-		  last_60ms_ultra = tick;
-		  HCSR04_Trigger(&mi_sensor_ultra);
-	  }
-	  HCSR04_EventHandler(&mi_sensor_ultra);
+			  // 4. SENSOR ULTRASÓNICO (Muestreo espaciado y preciso)
+			  if (tick - last_1ms_ultra >= 1) {
+				  last_1ms_ultra = tick;
+				  HCSR04_TickISR(&mi_sensor_ultra);
+			  }
+			  if (tick - last_100ms_ultra >= 100) {
+				  last_100ms_ultra = tick;
+				  HCSR04_Trigger(&mi_sensor_ultra);
+			  }
 
-	  // 5. SERVO MOTOR
-	  if (tick - last_20ms_servo >= 20) {
-		  last_20ms_servo = tick;
-		  Servo_Task(&mi_servo);
-	  }
+			  // 5. SERVO MOTOR (Cada 20ms)
+			  if (tick - last_20ms_servo >= 20) {
+				  last_20ms_servo = tick;
+				  Servo_Task(&mi_servo);
+			  }
 
-	  // 6. REFRESCO DE PANTALLA (10 FPS)
-	  if (tick - last_100ms_ui >= 100) {
-		  last_100ms_ui = tick;
-		  uint8_t udp_ok = (ESP01_StateUDPTCP() == ESP01_UDPTCP_CONNECTED);
-		  char* ip = ESP01_GetLocalIP();
-		  UI_Render(valores_ir[0], valores_ir[1], valores_ir[2],
-					distancia_actual_mm, ip, udp_ok, pc_conectada, &mi_seguidor);
-	  }
+			  // 6. REFRESCO DE PANTALLA (10 FPS)
+			  if (tick - last_100ms_ui >= 100) {
+				  last_100ms_ui = tick;
+				  uint8_t udp_ok = (ESP01_StateUDPTCP() == ESP01_UDPTCP_CONNECTED);
+				  char* ip = ESP01_GetLocalIP();
+				  UI_Render(valores_ir[0], valores_ir[1], valores_ir[2],
+							distancia_actual_mm, ip, udp_ok, pc_conectada, &mi_seguidor);
+			  }
 
-	  // 7. ENVÍO DE TELEMETRÍA (20 FPS)
-	  if (tick - last_50ms_telem >= 50) {
-		  last_50ms_telem = tick;
-		  Comandos_EnviarAlive();
-		  Comandos_EnviarTelemetria(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm);
-		  Comandos_FlushTx();
-	  }
+			  // 7. ENVÍO DE TELEMETRÍA (20 FPS)
+			  if (tick - last_50ms_telem >= 50) {
+				  last_50ms_telem = tick;
+				  Comandos_EnviarAlive();
+				  Comandos_EnviarTelemetria(valores_ir[0], valores_ir[1], valores_ir[2], distancia_actual_mm);
+				  Comandos_FlushTx();
+			  }
 
-
-	  // Dentro del main.c, en el while(1), abajo de todo
-	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_RUNNING) {
-	      // Si estamos en running, los motores DEBEN estar configurados en modo ADELANTE
-	      HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
-	      HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-	      HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
-	      HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-	  }
-
-	  // Dentro del main.c, en el while(1)
-	  if (adc_listo) {
-	      adc_listo = 0; // Reset flag
-	      // Disparamos la siguiente conversión para que el DMA no se detenga
-	      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
-	  }
-
-	  // Lógica Seguidor: Pasamos los valores_ir que el DMA acaba de llenar
-	  Seguidor_Task(&mi_seguidor, valores_ir, 4000);
-	  // LÓGICA DE TRANSICIÓN SEGURA
-	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_CALIBRANDO) {
-	      // Si pasaron 20 segundos
-	      if (HAL_GetTick() - mi_seguidor.tiempo_inicio_cal > 20000) {
-	          mi_seguidor.estado = ESTADO_SEGUIDOR_RUNNING;
-	          UI_AddLog("SEG: RUNNING");
-	      }
-	  }
-
-	  // LÓGICA DE EJECUCIÓN (Llamamos a la tarea)
-	  if (mi_seguidor.estado == ESTADO_SEGUIDOR_RUNNING) {
-	      Seguidor_Task(&mi_seguidor, valores_ir, 4000);
-	  } else if (mi_seguidor.estado == ESTADO_SEGUIDOR_CALIBRANDO) {
-	      // Solo calibrar si no hay comandos manuales (para evitar el override)
-	      Seguidor_Calibrar(&mi_seguidor, valores_ir);
-	  }
-
-
+			  // 8. CONTROL DEL ADC POR DMA
+			  if (adc_listo) {
+			      adc_listo = 0;
+			      HAL_ADC_Start_DMA(&hadc1, (uint32_t*)valores_ir, 3);
+			  }
 	/* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

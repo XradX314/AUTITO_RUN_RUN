@@ -2,37 +2,39 @@
 #define SEGUIDOR_H_
 
 #include <stdint.h>
-#include <stdbool.h>
-
-typedef enum {
-	ESTADO_SEGUIDOR_OFF,      // Apaga todo una sola vez
-	ESTADO_SEGUIDOR_INACTIVO, // Estado de reposo absoluto (No pisa los PWM)
-    ESTADO_SEGUIDOR_CALIBRANDO,
-    ESTADO_SEGUIDOR_RUNNING,
-	// --- NUEVOS ESTADOS DE RESCATE ---
-	ESTADO_RESCATE_REVERSA,
-	ESTADO_RESCATE_ESPERA_FIJA,
-	ESTADO_RESCATE_GIRO_BUSQUEDA
-} eSeguidorEstado;
 
 typedef struct {
-    float Kp;
-    float Ki;
-    float Kd;
-    float prev_error;
-    float integral;
+    // Coeficientes PID convencionales (Aritmética entera)
+    int32_t Kp;
+    int32_t Ki;
+    int32_t Kd;
+
+    // Historial del bucle de control
+    int32_t ultimo_error;
+    int32_t integral;
+
+    // Calibración física de los sensores IR
     uint16_t min_cal[3];
     uint16_t max_cal[3];
-    eSeguidorEstado estado;
-    uint32_t tiempo_inicio_cal;
-    uint8_t ultimo_lado_giro; // 0 = Izquierda, 1 = Derecha
-    uint32_t rescate_timer;
+
+    // Parámetros de lazo abierto para curvas de 90° / Rescate
+    uint16_t pwm_giro_ext;   // Velocidad rueda de afuera en quiebre cerrado
+    int16_t  pwm_giro_int;   // Velocidad (o reversa) rueda de adentro en quiebre cerrado
+
+    // Rastreador físico de escape
+    int32_t ultimo_error_valido; // Guarda el signo del error justo antes de salir al blanco
+
+    // NUEVO FLAG DE CONTROL
+        uint8_t ejecucion_activa; // 0 = Detenido/Bypass, 1 = PID Activo en pista
+
+        uint8_t modo_calibracion;
 } sSeguidorHandle;
 
+// API de la Librería Convencional
 void Seguidor_Init(sSeguidorHandle *hSeg);
+void Seguidor_Task(sSeguidorHandle *hSeg, uint16_t *vals_adc, uint16_t vel_base);
 void Seguidor_Calibrar(sSeguidorHandle *hSeg, uint16_t *valores_actuales);
-void Seguidor_Task(sSeguidorHandle *hSeg, uint16_t *vals, uint16_t vel_base);
-void Seguidor_SetEstado(sSeguidorHandle *hSeg, eSeguidorEstado estado);
-float Seguidor_GetNorm(sSeguidorHandle *hSeg, uint16_t raw, uint8_t idx);
+int32_t Seguidor_GetNorm(sSeguidorHandle *hSeg, uint16_t raw, uint8_t idx);
+uint16_t Seguidor_LeerPosicionLinea(sSeguidorHandle *hSeg, uint16_t *vals_adc);
 
 #endif /* SEGUIDOR_H_ */

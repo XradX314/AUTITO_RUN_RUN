@@ -6,11 +6,11 @@
 #include <stdio.h>
 #include "main.h" // Para HAL_GetTick()
 #include "Servo.h"
-
+#include "seguidor.h"
 
 // Asegurate de tener el acceso al handler del seguidor
 extern sSeguidorHandle mi_seguidor;
-
+extern uint16_t valores_ir[3];
 extern UART_HandleTypeDef huart1; // Para poder usar el UART de la PC acá
 // NUEVO: Le avisamos al compilador que busque a htim3 en otro archivo
 extern TIM_HandleTypeDef htim3;
@@ -43,7 +43,7 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                         uint8_t angulo_recibido = params[0];
 
                         // Le pasamos el ángulo directo a tu librería
-                        Servo_SetAngle(&mi_servo, (float)angulo_recibido);
+                        Servo_SetAngle(&mi_servo, (angulo_recibido*100));
 
                         // Opcional: Lo mostramos en la OLED para confirmar
                         sprintf(logMsg, "SERVO: %d GRADOS", angulo_recibido);
@@ -121,30 +121,50 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                     }
                     break;
 
-        case CMD_SEGUIDOR_CTRL:
-            if (len >= 1) {
-                uint8_t accion = params[0];
-                if (accion == 0) {
-                    Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_OFF);
-                    UI_AddLog("SEG: STOPPED");
-                } else if (accion == 1) {
-                    Seguidor_SetEstado(&mi_seguidor, ESTADO_SEGUIDOR_CALIBRANDO);
-                    UI_AddLog("SEG: CALIBRANDO");
-                } else if (accion == 2) {
-                    mi_seguidor.estado = ESTADO_SEGUIDOR_RUNNING;
-                    UI_AddLog("SEG: RUNNING");
-                }
-            }
-            break;
+         case CMD_SEGUIDOR_CTRL:
+                    if (len >= 1) {
+                        uint8_t accion = params[0];
 
+                        if (accion == 0) {
+                            // STOP: Primero apagamos el flag para que Seguidor_Task deje de pisar los registros
+                            mi_seguidor.ejecucion_activa = 0;
+                            mi_seguidor.modo_calibracion = 0; // Apagamos el escáner continuo
+
+                            // Ahora sí, clavamos los pines y los timers en cero absoluto de forma segura
+                            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+                            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+                            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+                            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+                            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+                            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+                            UI_AddLog("SEG: STOPPED");
+                        }
+                        else if (accion == 1) {
+                            mi_seguidor.modo_calibracion = 1; // Encendemos el escáner continuo
+                            UI_AddLog("SEG: CALIBRANDO...");
+                        }
+                        else if (accion == 2) {
+                            // RUN: Limpiamos la memoria y encendemos el flag para habilitar el PID
+                            mi_seguidor.integral = 0;
+                            mi_seguidor.ultimo_error = 0;
+                            mi_seguidor.ultimo_error_valido = 0;
+                            mi_seguidor.modo_calibracion = 0; // Apagamos el escáner continuo
+
+                            mi_seguidor.ejecucion_activa = 1; // ¡A CORRER!
+                            UI_AddLog("SEG: RUNNING");
+                        }
+                    }
+                    break;
         case CMD_SEGUIDOR_PID:
-            if (len >= 12) { // 3 floats de 4 bytes = 12 bytes
-                memcpy(&mi_seguidor.Kp, &params[0], 4);
-                memcpy(&mi_seguidor.Ki, &params[4], 4);
-                memcpy(&mi_seguidor.Kd, &params[8], 4);
-                UI_AddLog("PID ACTUALIZADO");
-            }
-            break;
+                    if (len >= 12) { // 3 enteros de 4 bytes = 12 bytes
+                        // Copia directa binaria de memoria a memoria
+                        memcpy(&mi_seguidor.Kp, &params[0], 4);
+                        memcpy(&mi_seguidor.Ki, &params[4], 4);
+                        memcpy(&mi_seguidor.Kd, &params[8], 4);
+
+                        UI_AddLog("PID ACTUALIZADO");
+                    }
+                    break;
 
 
         default:
