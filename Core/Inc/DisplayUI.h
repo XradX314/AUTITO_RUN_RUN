@@ -23,5 +23,6 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
 // Funciones para lanzar pop-ups flotantes
 void UI_PopupServo(uint8_t angulo);
 void UI_PopupMotor(uint8_t direccion, uint8_t velocidad);
+void UI_PopupSeguidor(uint8_t estado); // 0=STOP, 1=CALIB, 2=RUN
 
 #endif /* DISPLAYUI_H_ */

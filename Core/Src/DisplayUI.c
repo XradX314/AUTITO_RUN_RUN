@@ -48,6 +48,13 @@ void UI_PopupMotor(uint8_t direccion, uint8_t velocidad) {
     popup_timer = HAL_GetTick();
 }
 
+void UI_PopupSeguidor(uint8_t estado) {
+    pop_val1 = estado;   // 0=STOP, 1=CALIB, 2=RUN
+    pop_val2 = 0;
+    popup_activo = 3;
+    popup_timer = HAL_GetTick();
+}
+
 // --- LOGICA DE NAVEGACIÓN CORREGIDA ---
 void UI_ShortClick(void) {
     if (current_state == STATE_MAIN_MENU) {
@@ -129,18 +136,25 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
             OLED_Print(0, 18, buf, 1, 1);
 
             sprintf(buf, "SONAR: %u mm", dist_mm);
-            OLED_Print(0, 28, buf, 1, 1);
+            OLED_Print(0, 27, buf, 1, 1);
 
-            // CORRECCIÓN BUG IP: Subimos los estados de conexión a la fila 40
-            OLED_Print(0, 40, is_pc_connected ? "LINK: OK" : "LINK: --", 1, 1);
-            OLED_Print(80, 40, is_udp_connected ? "UDP: (*)" : "UDP: ( )", 1, 1);
+            // NUEVO: Estado del seguidor con indicador visual
+            {
+                const char* seg_str;
+                if      (hSeg->modo_calibracion)   seg_str = "SEG:[CALIB ]";
+                else if (hSeg->ejecucion_activa)   seg_str = "SEG:[RUN   ]";
+                else                               seg_str = "SEG:[STOP  ]";
+                OLED_Print(0, 36, seg_str, 1, 1);
+            }
 
-            OLED_DrawHLine(0, 52, 128, 1);
+            OLED_Print(70, 36, is_pc_connected ? "LINK:OK" : "LINK:--", 1, 1);
+            OLED_Print(0,  46, is_udp_connected ? "UDP: (*)" : "UDP: ( )", 1, 1);
 
-            // Dejamos la fila 56 exclusiva para que la IP tenga todo el ancho de pantalla
+            OLED_DrawHLine(0, 55, 128, 1);
+
             if (ip) {
                 sprintf(buf, "IP: %s", ip);
-                OLED_Print(0, 56, buf, 1, 1);
+                OLED_Print(0, 57, buf, 1, 1);
             }
             break;
 
@@ -221,26 +235,24 @@ void UI_Render(uint16_t ir_l, uint16_t ir_c, uint16_t ir_r, uint16_t dist_mm, co
                 OLED_DrawRect(ox+1, oy+10 + ofs, 3, 4, 1);
                 OLED_DrawRect(ox+14, oy+10 + ofs, 3, 4, 1);
             } else if (popup_activo == 3) {
-                // --- POPUP CALIBRACIÓN (Cuenta regresiva y animación) ---
-                sprintf(popMsg, "BARRIDO:");
-                OLED_Print(45, 18, popMsg, 1, 1);
+                // --- POPUP SEGUIDOR ---
+                char* segStr = "STOP";
+                if (pop_val1 == 1) segStr = "CALIBRANDO";
+                if (pop_val1 == 2) segStr = "CORRIENDO";
 
-                // pop_val1 va a contener los segundos restantes
-                sprintf(popMsg, "%d seg", pop_val1);
-                OLED_Print(45, 30, popMsg, 1, 1);
+                OLED_Print(45, 18, segStr, 1, 1);
 
-                // Icono de un Reloj / Cronómetro (Dibujo estático con aguja animada)
+                // Icono: cronómetro animado (ya lo tenés)
                 uint8_t ox = 22; uint8_t oy = 24;
-                OLED_DrawCircle(ox, oy, 7, 1);       // Cuerpo del reloj
-                OLED_DrawHLine(ox-3, oy-9, 7, 1);     // Botón superior
-                OLED_DrawVLine(ox, oy-9, 2, 1);       // Eje del botón
+                OLED_DrawCircle(ox, oy, 7, 1);
+                OLED_DrawHLine(ox-3, oy-9, 7, 1);
+                OLED_DrawVLine(ox, oy-9, 2, 1);
 
-                // Aguja animada: gira en 4 posiciones según el tiempo
                 uint8_t fase = (HAL_GetTick() / 250) % 4;
-                if (fase == 0)      OLED_DrawVLine(ox, oy-4, 4, 1); // Apunta arriba
-                else if (fase == 1) OLED_DrawHLine(ox, oy, 4, 1);   // Apunta derecha
-                else if (fase == 2) OLED_DrawVLine(ox, oy, 4, 1);   // Apunta abajo
-                else                OLED_DrawHLine(ox-4, oy, 4, 1); // Apunta izquierda
+                if      (fase == 0) OLED_DrawVLine(ox, oy-4, 4, 1);
+                else if (fase == 1) OLED_DrawHLine(ox, oy, 4, 1);
+                else if (fase == 2) OLED_DrawVLine(ox, oy, 4, 1);
+                else                OLED_DrawHLine(ox-4, oy, 4, 1);
             }
         }
     }

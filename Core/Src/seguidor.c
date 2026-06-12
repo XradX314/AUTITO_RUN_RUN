@@ -7,21 +7,29 @@ extern TIM_HandleTypeDef htim3;
 
 // Inicialización estándar con los pesos y deltas de competición [cite: 614, 622]
 void Seguidor_Init(sSeguidorHandle *hSeg) {
-    // Sintonía base agresiva para el rango posicional de 0 a 2000 [cite: 615, 617]
-    hSeg->Kp = 4;                     // Multiplicador directo de error posicional
-    hSeg->Ki = 0;                     // Curva U larga: preferible en 0 para evitar trompos por acumulación [cite: 427, 925]
-    hSeg->Kd = 25;                    // Amortiguación derivativa alta para frenar el zapateo de trompa [cite: 551]
+    hSeg->Kp = 4;
+    hSeg->Ki = 0;
+    hSeg->Kd = 25;
 
     hSeg->ultimo_error = 0;
     hSeg->integral = 0;
     hSeg->ultimo_error_valido = 0;
+    hSeg->tick_inicio_blanco = 0;
+    hSeg->timeout_fin_ms     = 800;  // Ajustá según tu pista
 
-    // Configuración nativa de timón fijo para el interceptor de lazo abierto (90°) [cite: 974, 978]
-    hSeg->pwm_giro_ext = 7500;        // Empuje pleno de la rueda exterior para forzar el quiebre [cite: 978]
-    hSeg->pwm_giro_int = -1500;       // VALOR NEGATIVO: Rueda interna gira activamente hacia ATRÁS (Giro de tanque) [cite: 976, 978]
+    hSeg->pwm_giro_ext = 7500;
+    hSeg->pwm_giro_int = -1500;
 
-    // El PID arranca dormido hasta que la HMI diga lo contrario
-        hSeg->ejecucion_activa = 0;
+    // NUEVOS: valores por defecto de los parámetros parametrizables
+    hSeg->vel_base          = 6200;   // Antes en main.c
+    hSeg->umbral_blanco     = 180;    // Umbral de detección fin de línea
+    hSeg->umbral_reenganche = 420;    // Presencia central para salir del giro
+    hSeg->umbral_denom      = 250;    // Mínimo denominador posición
+    hSeg->clamp_integral    = 1500;
+    hSeg->clamp_pid         = 6000;
+
+    hSeg->ejecucion_activa = 0;
+    hSeg->modo_calibracion = 0;
 
     for(int i = 0; i < 3; i++) {
         hSeg->min_cal[i] = 4095;
@@ -63,7 +71,7 @@ uint16_t Seguidor_LeerPosicionLinea(sSeguidorHandle *hSeg, uint16_t *vals_adc) {
     int32_t denominador = s0 + s1 + s2;
 
     // Si la suma es menor a 50, significa que prácticamente no hay negro en ningún sensor
-    if (denominador < 250) {
+    if (denominador < hSeg->umbral_denom) {
         return 1000; // Retornamos centro de cortesía para que el interceptor decida
     }
 
@@ -86,45 +94,66 @@ void Seguidor_Task(sSeguidorHandle *hSeg, uint16_t *vals_adc, uint16_t vel_base)
     int32_t presencia_cen = 1000 - Seguidor_GetNorm(hSeg, vals_adc[1], 1);
     int32_t presencia_der = 1000 - Seguidor_GetNorm(hSeg, vals_adc[2], 2);
 
-    // --- INTERCEPTOR DE LAZO ABIERTO NO BLOQUEANTE (CURVAS DE 90°) ---
-    if ((presencia_izq < 80 && presencia_cen < 80 && presencia_der < 80) ||
-        (hSeg->ultimo_error_valido == 9999)) {
+    // --- INTERCEPTOR DE LAZO ABIERTO NO BLOQUEANTE (CURVAS DE 90° / FIN DE PISTA) ---
+    uint8_t sin_linea = (presencia_izq < hSeg->umbral_blanco &&
+                         presencia_cen < hSeg->umbral_blanco &&
+                         presencia_der < hSeg->umbral_blanco);
 
-        if (hSeg->ultimo_error_valido != 9999) {
-            // CORREGIDO: Inversión de signo para asegurar el sentido del escape directo a la línea
-            hSeg->ultimo_error_valido = (hSeg->ultimo_error < 0) ? 1 : -1;
+    // ENTRADA: primera vez que perdemos la línea
+    if (sin_linea && hSeg->ultimo_error_valido == 0) {
+        hSeg->ultimo_error_valido = (hSeg->ultimo_error <= 0) ? -1 : 1;
+        hSeg->tick_inicio_blanco  = tick;
+    }
+
+    if (hSeg->ultimo_error_valido != 0) {
+
+        // TIMEOUT: demasiado tiempo en blanco → fin de pista → freno total
+        if (tick - hSeg->tick_inicio_blanco > hSeg->timeout_fin_ms) {
+            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
+            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
+            hSeg->ejecucion_activa    = 0;
+            hSeg->ultimo_error_valido = 0;
+            hSeg->integral            = 0;
+            hSeg->tick_inicio_blanco  = 0;
+            return;
         }
 
+        // GIRO DE RESCATE
         if (hSeg->ultimo_error_valido == -1) {
             // Giro cerrado hacia la IZQUIERDA
             HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_SET);
             HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_SET);
-
             uint16_t pwm_interno = (hSeg->pwm_giro_int < 0) ? -hSeg->pwm_giro_int : hSeg->pwm_giro_int;
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, pwm_interno);
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, hSeg->pwm_giro_ext);
-        }
-        else {
+        } else {
             // Giro cerrado hacia la DERECHA
             HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
             HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET); // Corregido pin de tracción nativa
             HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_SET);
             HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-
             uint16_t pwm_interno = (hSeg->pwm_giro_int < 0) ? -hSeg->pwm_giro_int : hSeg->pwm_giro_int;
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, hSeg->pwm_giro_ext);
             __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, pwm_interno);
         }
 
-        if (presencia_cen > 550) {
-            hSeg->integral = 0;
-            hSeg->ultimo_error = 0;
+        // REENGANCHE: cualquier sensor ve negro → volver al PID
+        if (presencia_cen > hSeg->umbral_reenganche ||
+            presencia_izq > hSeg->umbral_reenganche ||
+            presencia_der > hSeg->umbral_reenganche) {
             hSeg->ultimo_error_valido = 0;
+            hSeg->integral            = 0;
+            hSeg->ultimo_error        = 0;
+            hSeg->tick_inicio_blanco  = 0;
         }
-        return;
+
+        return;  // Mientras el interceptor está activo, el PID no se ejecuta
     }
 
     // =================================================================
@@ -147,15 +176,18 @@ void Seguidor_Task(sSeguidorHandle *hSeg, uint16_t *vals_adc, uint16_t vel_base)
         hSeg->ultimo_error = error;
 
         hSeg->integral += error;
-        if (hSeg->integral > 1500)       hSeg->integral = 1500;
-        else if (hSeg->integral < -1500) hSeg->integral = -1500;
+        // Clamp integral - cambiar 1500 por:
+                if (hSeg->integral > hSeg->clamp_integral)
+                    hSeg->integral = hSeg->clamp_integral;
+                else if (hSeg->integral < -hSeg->clamp_integral)
+                    hSeg->integral = -hSeg->clamp_integral;
 
         int32_t salida_pid = (hSeg->Kp * error) + (hSeg->Ki * hSeg->integral) + (hSeg->Kd * derivada);
 
             // --- BLINDAJE DE SATURACIÓN DE SALIDA PID ---
             // Como el PWM máximo es 9999, la corrección máxima jamás debería poder exceder +/- 6000
-            if (salida_pid > 6000)  salida_pid = 6000;
-            if (salida_pid < -6000) salida_pid = -6000;
+        if (salida_pid >  hSeg->clamp_pid) salida_pid =  hSeg->clamp_pid;
+        if (salida_pid < -hSeg->clamp_pid) salida_pid = -hSeg->clamp_pid;
 
             int32_t m_izq = (int32_t)vel_base + salida_pid;
             int32_t m_der = (int32_t)vel_base - salida_pid;

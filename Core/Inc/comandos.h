@@ -13,10 +13,24 @@
 #define CMD_MOTORES 	0x06
 #define CMD_SEGUIDOR_CTRL 0x07 // Payload: [0=STOP, 1=START_CALIB, 2=RUN]
 #define CMD_SEGUIDOR_PID  0x08 // Payload: [Kp(4 bytes), Ki(4 bytes), Kd(4 bytes)]
+#define CMD_SEGUIDOR_PARAMS  0x09 // Payload: vel_base(2) + umbral_blanco(2) + umbral_reenganche(2) +  umbral_denom(2) + clamp_integral(4) + clamp_pid(4) +  pwm_giro_ext(2) + pwm_giro_int(2) = 20 bytes total
 
 // Variable global que indica si la PC está viva
 extern bool pc_conectada;
 extern uint32_t ultimo_ack_ms; // Asegúrate que esta línea exista en el header
+
+
+typedef struct {
+    uint16_t vel_base;
+    uint16_t umbral_blanco;
+    uint16_t umbral_reenganche;
+    uint16_t umbral_denom;
+    int32_t  clamp_integral;
+    int32_t  clamp_pid;
+    uint16_t pwm_giro_ext;
+    int16_t  pwm_giro_int;
+    uint16_t timeout_fin_ms;   // NUEVO — 22 bytes total
+} __attribute__((packed)) sSeguidorParams;
 
 // Estructura empaquetada para mandar toda la telemetría en un solo bloque de bytes
 typedef struct {

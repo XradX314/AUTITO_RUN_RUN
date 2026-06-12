@@ -285,8 +285,8 @@ int main(void)
                 mi_seguidor.Kd = 40;        // Derivativo alto para amortiguar el chasis
 
                 // Ajuste inercial del interceptor bloqueante de 90°:
-                mi_seguidor.pwm_giro_ext = 7800;  // La rueda de afuera empuja con fuerza sorda
-                mi_seguidor.pwm_giro_int = -1500; // La rueda de adentro va EN REVERSA activa (Giro tanque)
+                mi_seguidor.pwm_giro_ext = 8800;  // La rueda de afuera empuja con fuerza sorda
+                mi_seguidor.pwm_giro_int = -2800; // La rueda de adentro va EN REVERSA activa (Giro tanque)
 
 
 
@@ -325,7 +325,7 @@ int main(void)
 
 			  // 3. MAQUINA DE ESTADOS DEL SEGUIDOR DE LÍNEA (¡UNA SOLA LLAMADA COMPLETA!)
 		      // El control de avance de pines se maneja ADENTRO de seguidor.c, no acá.
-			  Seguidor_Task(&mi_seguidor, valores_ir, 6200);
+			  Seguidor_Task(&mi_seguidor, valores_ir, mi_seguidor.vel_base);
 			  if (mi_seguidor.modo_calibracion == 1) {
 			      Seguidor_Calibrar(&mi_seguidor, valores_ir);
 			  }

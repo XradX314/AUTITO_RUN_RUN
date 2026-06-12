@@ -121,40 +121,27 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                     }
                     break;
 
-         case CMD_SEGUIDOR_CTRL:
-                    if (len >= 1) {
-                        uint8_t accion = params[0];
-
-                        if (accion == 0) {
-                            // STOP: Primero apagamos el flag para que Seguidor_Task deje de pisar los registros
-                            mi_seguidor.ejecucion_activa = 0;
-                            mi_seguidor.modo_calibracion = 0; // Apagamos el escáner continuo
-
-                            // Ahora sí, clavamos los pines y los timers en cero absoluto de forma segura
-                            HAL_GPIO_WritePin(GPIOB, IN_1_Pin, GPIO_PIN_RESET);
-                            HAL_GPIO_WritePin(GPIOB, IN_2_Pin, GPIO_PIN_RESET);
-                            HAL_GPIO_WritePin(GPIOB, IN_3_Pin, GPIO_PIN_RESET);
-                            HAL_GPIO_WritePin(GPIOB, IN_4_Pin, GPIO_PIN_RESET);
-                            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, 0);
-                            __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, 0);
-                            UI_AddLog("SEG: STOPPED");
-                        }
-                        else if (accion == 1) {
-                            mi_seguidor.modo_calibracion = 1; // Encendemos el escáner continuo
-                            UI_AddLog("SEG: CALIBRANDO...");
-                        }
-                        else if (accion == 2) {
-                            // RUN: Limpiamos la memoria y encendemos el flag para habilitar el PID
-                            mi_seguidor.integral = 0;
-                            mi_seguidor.ultimo_error = 0;
-                            mi_seguidor.ultimo_error_valido = 0;
-                            mi_seguidor.modo_calibracion = 0; // Apagamos el escáner continuo
-
-                            mi_seguidor.ejecucion_activa = 1; // ¡A CORRER!
-                            UI_AddLog("SEG: RUNNING");
-                        }
-                    }
-                    break;
+        case CMD_SEGUIDOR_CTRL:
+            if (len >= 1) {
+                uint8_t accion = params[0];
+                if (accion == 0) {
+                    mi_seguidor.ejecucion_activa = 0;
+                    mi_seguidor.modo_calibracion = 0;
+                    UI_AddLog("SEG: STOP");
+                    UI_PopupSeguidor(0);   // <<< NUEVO
+                } else if (accion == 1) {
+                    mi_seguidor.ejecucion_activa = 0;
+                    mi_seguidor.modo_calibracion = 1;
+                    UI_AddLog("SEG: CALIBRANDO");
+                    UI_PopupSeguidor(1);   // <<< NUEVO
+                } else if (accion == 2) {
+                    mi_seguidor.modo_calibracion = 0;
+                    mi_seguidor.ejecucion_activa = 1;
+                    UI_AddLog("SEG: RUNNING");
+                    UI_PopupSeguidor(2);   // <<< NUEVO
+                }
+            }
+            break;
         case CMD_SEGUIDOR_PID:
                     if (len >= 12) { // 3 enteros de 4 bytes = 12 bytes
                         // Copia directa binaria de memoria a memoria
@@ -165,6 +152,24 @@ void Comandos_Parsear(uint8_t cmd, uint8_t* params, uint8_t len) {
                         UI_AddLog("PID ACTUALIZADO");
                     }
                     break;
+        case CMD_SEGUIDOR_PARAMS:
+            if (len >= sizeof(sSeguidorParams)) {
+                sSeguidorParams p;
+                memcpy(&p, params, sizeof(sSeguidorParams));
+
+                mi_seguidor.vel_base          = p.vel_base;
+                mi_seguidor.umbral_blanco     = p.umbral_blanco;
+                mi_seguidor.umbral_reenganche = p.umbral_reenganche;
+                mi_seguidor.umbral_denom      = p.umbral_denom;
+                mi_seguidor.clamp_integral    = p.clamp_integral;
+                mi_seguidor.clamp_pid         = p.clamp_pid;
+                mi_seguidor.pwm_giro_ext      = p.pwm_giro_ext;
+                mi_seguidor.pwm_giro_int      = p.pwm_giro_int;
+                mi_seguidor.timeout_fin_ms    = p.timeout_fin_ms;  // NUEVO
+
+                UI_AddLog("PARAMS: OK");
+            }
+            break;
 
 
         default:
